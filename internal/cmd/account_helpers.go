@@ -11,6 +11,13 @@ import (
 var openSecretsStore = secrets.OpenDefault
 
 func requireAccount(flags *RootFlags) (string, error) {
+	store, _ := openSecretsStore()
+	return requireAccountWithStore(flags, store)
+}
+
+// requireAccountWithStore resolves the active account email.
+// If store is nil, keyring-based fallback (default account, single-token) is skipped.
+func requireAccountWithStore(flags *RootFlags, store secrets.Store) (string, error) {
 	client := config.DefaultClientName
 
 	var err error
@@ -55,7 +62,7 @@ func requireAccount(flags *RootFlags) (string, error) {
 		}
 	}
 
-	if store, storeErr := openSecretsStore(); storeErr == nil {
+	if store != nil {
 		if defaultEmail, defErr := store.GetDefaultAccount(client); defErr == nil {
 			defaultEmail = strings.TrimSpace(defaultEmail)
 			if defaultEmail != "" {

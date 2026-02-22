@@ -16,14 +16,21 @@ Fast, agentic and script-friendly CLI for managing Tienda Nube stores from the t
 - **Secure credential storage** — OS keyring or encrypted on-disk keyring (configurable)
 - **Auth** — OAuth authorization via broker (zero-setup) or native browser flow (custom app credentials), credential management, account aliases
 - **Parseable output** — JSON (`--json`) and TSV (`--plain`) modes for scripting and automation
+- **Store** — get store info (name, email, domain, plan)
+- **Products** — list/get products with full filtering and pagination; look up by SKU
+- **Orders** — list/get orders with filtering by status, payment, shipping, and date ranges
+- **Categories** — list/get categories with filtering
+- **Customers** — list/get customers with search and filtering
+- **Agent helpers** — stable exit codes (`nube agent exit-codes`), machine-readable command schema (`nube schema`)
+- **Desire paths** — top-level shortcuts: `nube shop`, `nube products`, `nube orders`, `nube status`, `nube login`
+- **Command aliases** — short forms: `prod`, `ord`, `cat`, `cust`, `help-json`
 
 **Planned:**
 
-- **Store** — get store info and general settings
-- **Products** — list/search/get/create/update/delete products and variants; look up by SKU; bulk-update stock and price; manage product images
-- **Categories** — list/get/create/update/delete categories; organize storefront navigation hierarchy
-- **Customers** — list/search/get/create/update/delete customers; inspect contact info and purchase history
-- **Orders** — list/search/get/create/update orders; open/close/cancel; view audit history; manage fulfillment orders and tracking events
+- **Products (writes)** — create/update/delete products and variants; bulk-update stock and price; manage product images
+- **Categories (writes)** — create/update/delete categories
+- **Customers (writes)** — create/update/delete customers
+- **Orders (writes)** — create/update orders; open/close/cancel; view audit history; manage fulfillment orders and tracking events
 - **Draft Orders** — create/confirm/delete draft orders from outside channels
 - **Abandoned Checkouts** — list/get abandoned checkouts; apply coupons to recover carts
 - **Coupons & Discounts** — list/get/create/update/delete coupons; define cart-level promotion and tier discount rules
@@ -61,13 +68,34 @@ Run:
 ```bash
 # Authorize a store (opens browser — no setup required)
 nube auth add user@example.com
+# or use the shortcut:
+nube login user@example.com
 
-# Check version
-nube version
+# Check store info
+nube shop --json
+
+# List products (first 5)
+nube products --json --per-page 5
+
+# List orders
+nube orders --json --status open
+
+# Get a single product
+nube product get 12345 --json
+
+# Look up by SKU
+nube product get-by-sku ABC-001 --json
+
+# List categories
+nube category list --json
 
 # JSON output for scripting
 nube version --json
 nube config list --json
+
+# Agent helpers
+nube agent exit-codes --json
+nube schema --json
 ```
 
 ## Authentication
@@ -158,6 +186,30 @@ nube auth alias list
 nube auth alias unset prod
 ```
 
+### Token-based (Agents & CI)
+
+For non-interactive environments (Docker, CI, agents), export a token from keyring
+to a `.env` file, then use it without keyring access:
+
+```bash
+# Export token to .env file (one-time, on a machine with keyring access)
+nube auth token user@example.com --export .env
+
+# Then use the .env file anywhere:
+docker run --env-file .env myimage nube products --json
+# or:
+source .env && nube products --json
+# or:
+env $(cat .env) nube products --json
+
+# Inline per-command (no file needed):
+NUBE_ACCESS_TOKEN=abc123 NUBE_USER_ID=456 nube products --json
+
+# Multi-account: set per invocation
+NUBE_ACCESS_TOKEN=$TOK1 NUBE_USER_ID=$ID1 nube shop --json
+NUBE_ACCESS_TOKEN=$TOK2 NUBE_USER_ID=$ID2 nube shop --json
+```
+
 ### Multiple Stores
 
 Use `--client` to manage separate OAuth credential sets and token buckets:
@@ -175,9 +227,29 @@ nube <command> --account user@example.com --client beta
 
 ## CLI Command Reference
 
+### Desire Paths (shortcuts)
+
+- `nube shop` — show store info (alias for `nube store get`)
+- `nube products [flags]` — list products (alias for `nube product list`)
+- `nube orders [flags]` — list orders (alias for `nube order list`)
+- `nube status` — show auth status (alias for `nube auth status`)
+- `nube login <email>` — authorize account (alias for `nube auth add`)
+
 ### Implemented
 
 - `nube version` — print version, commit, and build date
+- `nube store get` — show store information (id, name, email, domain, plan)
+- `nube product list [flags]` — list products with pagination and filters
+- `nube product get <id>` — get a product by ID
+- `nube product get-by-sku <sku>` — get a product by SKU
+- `nube order list [flags]` — list orders with pagination and filters
+- `nube order get <id>` — get an order by ID
+- `nube category list [flags]` — list categories
+- `nube category get <id>` — get a category by ID
+- `nube customer list [flags]` — list customers
+- `nube customer get <id>` — get a customer by ID
+- `nube agent exit-codes` — print stable exit code map
+- `nube schema` — machine-readable command schema (JSON)
 - `nube config keys` — list valid config keys
 - `nube config get <key>` — get a config value
 - `nube config list` — list all config values
@@ -193,11 +265,40 @@ nube <command> --account user@example.com --client beta
 - `nube auth alias unset <alias>` — remove account alias
 - `nube auth status` — show auth config and keyring backend
 - `nube auth remove <email>` — remove stored token
+- `nube auth token [email]` — print access token for an account
+- `nube auth token [email] --export FILE` — export token to dotenv file
 - `nube auth tokens list` — list raw keyring keys
 - `nube auth tokens delete <email>` — delete stored token
 
+### Command Aliases
+
+- `nube prod` = `nube product`
+- `nube ord` = `nube order`
+- `nube cat` = `nube category`
+- `nube cust` = `nube customer`
+- `nube help-json` = `nube schema`
+
+### Stable Exit Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | ok | Success |
+| 1 | error | Generic error |
+| 2 | usage | Invalid usage / bad arguments |
+| 3 | auth_required | Authentication required (HTTP 401) |
+| 4 | not_found | Resource not found (HTTP 404) |
+| 5 | permission_denied | Permission denied (HTTP 403) |
+| 6 | rate_limited | Rate limited (HTTP 429) |
+| 7 | retryable | Retryable server error (HTTP 5xx) |
+| 8 | config | Missing config or credentials |
+| 9 | cancelled | User cancelled |
+| 10 | payment_required | Payment required (HTTP 402) |
+| 11 | validation | Validation error (HTTP 422) |
+
 ## Environment Variables
 
+ - `NUBE_ACCESS_TOKEN` — Access token for API commands (bypasses keyring; for agents and CI)
+ - `NUBE_USER_ID` — Store/user ID (used with `NUBE_ACCESS_TOKEN`)
  - `NUBE_ACCOUNT` — Account email or alias for API commands (used when `--account` is not set)
  - `NUBE_CLIENT` — OAuth client bucket name (used when `--client` is not set)
  - `NUBE_AUTH_BROKER` — OAuth broker URL (overrides the default broker)

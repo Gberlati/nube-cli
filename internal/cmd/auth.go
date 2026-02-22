@@ -32,6 +32,7 @@ type AuthCmd struct {
 	Status      AuthStatusCmd      `cmd:"" name:"status" help:"Show auth configuration and keyring backend"`
 	Remove      AuthRemoveCmd      `cmd:"" name:"remove" help:"Remove a stored access token"`
 	Tokens      AuthTokensCmd      `cmd:"" name:"tokens" help:"Manage stored access tokens"`
+	Token       AuthTokenCmd       `cmd:"" name:"token" help:"Print access token for an account"`
 }
 
 // --- Credentials ---
@@ -512,4 +513,75 @@ func (c *AuthTokensDeleteCmd) Run(ctx context.Context, flags *RootFlags) error {
 		kv("email", email),
 		kv("client", client),
 	)
+}
+
+// --- Auth Token (export) ---
+
+type AuthTokenCmd struct {
+	Email  string `arg:"" optional:"" name:"email" help:"Account email (uses default if omitted)"`
+	Export string `help:"Write NUBE_ACCESS_TOKEN and NUBE_USER_ID to a dotenv file" name:"export" placeholder:"FILE"`
+}
+
+func (c *AuthTokenCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+
+	email := normalizeEmail(c.Email)
+
+	client, err := config.NormalizeClientNameOrDefault(flags.Client)
+	if err != nil {
+		return err
+	}
+
+	store, err := openSecretsStore()
+	if err != nil {
+		return err
+	}
+
+	if email == "" {
+		email, err = requireAccountWithStore(flags, store)
+		if err != nil {
+			return err
+		}
+	}
+
+	tok, err := store.GetToken(client, email)
+	if err != nil {
+		return &ExitErr{Code: ExitConfig, Err: err}
+	}
+
+	// --export: write dotenv file
+	if c.Export != "" {
+		content := fmt.Sprintf("NUBE_ACCESS_TOKEN=%s\nNUBE_USER_ID=%s\n", tok.AccessToken, tok.UserID)
+		if err := os.WriteFile(c.Export, []byte(content), 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", c.Export, err)
+		}
+
+		if outfmt.IsJSON(ctx) {
+			return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+				"exported": true,
+				"path":     c.Export,
+				"email":    tok.Email,
+				"user_id":  tok.UserID,
+			})
+		}
+
+		u.Err().Printf("Wrote %s", c.Export)
+
+		return nil
+	}
+
+	// --json: full token info
+	if outfmt.IsJSON(ctx) {
+		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+			"access_token": tok.AccessToken,
+			"user_id":      tok.UserID,
+			"email":        tok.Email,
+			"client":       tok.Client,
+		})
+	}
+
+	// Plain: just the token, suitable for $(nube auth token ...)
+	fmt.Fprintln(os.Stdout, tok.AccessToken)
+
+	return nil
 }

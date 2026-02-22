@@ -18,7 +18,7 @@ func confirmDestructive(flags *RootFlags, action string) error {
 
 	// Never prompt in non-interactive contexts.
 	if flags.NoInput || !term.IsTerminal(int(os.Stdin.Fd())) { //nolint:gosec // fd conversion is safe
-		return usagef("refusing to %s without --force (non-interactive)", action)
+		return &ExitErr{Code: ExitUsage, Err: fmt.Errorf("refusing to %s without --force (non-interactive)", action)}
 	}
 
 	fmt.Fprintf(os.Stderr, "Proceed to %s? [y/N]: ", action)
@@ -33,5 +33,5 @@ func confirmDestructive(flags *RootFlags, action string) error {
 		return nil
 	}
 
-	return &ExitError{Code: 1, Err: errors.New("cancelled")}
+	return &ExitErr{Code: ExitCancelled, Err: errors.New("cancelled")}
 }

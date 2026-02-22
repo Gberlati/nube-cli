@@ -130,6 +130,8 @@ Environment:
 - `NUBE_ACCOUNT=you@gmail.com` (email or alias; used when `--account` is not set; otherwise uses keyring default or a single stored token)
 - `NUBE_CLIENT=work` (select OAuth client bucket; see `--client`)
 - `NUBE_AUTH_BROKER=https://...` (override the default OAuth broker URL; see `--broker-url`)
+- `NUBE_ACCESS_TOKEN=...` (access token for API commands; bypasses keyring entirely; for agents and CI)
+- `NUBE_USER_ID=...` (store/user ID; used with `NUBE_ACCESS_TOKEN`; required for API calls)
 - `NUBE_KEYRING_PASSWORD=...` (used when keyring falls back to encrypted file backend in non-interactive environments)
 - `NUBE_KEYRING_BACKEND={auto|keychain|file}` (force backend; use `file` to avoid Keychain prompts and pair with `NUBE_KEYRING_PASSWORD` for non-interactive)
 - `config.json` can also set `keyring_backend` (JSON5; env vars take precedence)
@@ -157,8 +159,23 @@ Environment:
 - `nube auth alias unset <alias>` — remove account alias
 - `nube auth status` — show auth config, keyring backend, resolved account
 - `nube auth remove <email>` — remove stored token (with confirmation)
+- `nube auth token [email] [--export FILE]` — print access token (or export to dotenv file)
 - `nube auth tokens list` — list raw keyring keys
 - `nube auth tokens delete <email>` — delete stored token (with confirmation)
+- `nube store get` — show store information
+- `nube product list [--ids IDs] [--since-id ID] [--q TEXT] [--handle HANDLE] [--category-id ID] [--published true|false] [--free-shipping true|false] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--sort-by CRITERIA] [--page N] [--per-page N] [--fields FIELDS]`
+- `nube product get <productId> [--fields FIELDS]`
+- `nube product get-by-sku <sku>`
+- `nube order list [--since-id ID] [--status STATUS] [--payment-status STATUS] [--shipping-status STATUS] [--channels CHANNELS] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--customer-ids IDs] [--q TEXT] [--page N] [--per-page N] [--fields FIELDS] [--aggregates AGGREGATES]`
+- `nube order get <orderId> [--fields FIELDS] [--aggregates AGGREGATES]`
+- `nube category list [--since-id ID] [--language LANG] [--handle HANDLE] [--parent-id ID] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--page N] [--per-page N] [--fields FIELDS]`
+- `nube category get <categoryId> [--fields FIELDS]`
+- `nube customer list [--since-id ID] [--q TEXT] [--email EMAIL] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--page N] [--per-page N] [--fields FIELDS]`
+- `nube customer get <customerId> [--fields FIELDS]`
+- `nube agent exit-codes` — print stable exit code map
+- `nube schema` — machine-readable command schema
+- Desire paths: `nube shop`, `nube products`, `nube orders`, `nube status`, `nube login`
+- Command aliases: `prod`, `ord`, `cat`, `cust`, `help-json`
 
 ### Planned
 
@@ -198,8 +215,6 @@ Environment:
 - `nube category <categoryId> custom-fields list`
 - `nube category <categoryId> custom-fields values set [--id UUID --value VALUE]...`
 
-- `nube category list [--since-id ID] [--language LANG] [--handle HANDLE] [--parent-id ID] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--page N] [--per-page N] [--fields FIELDS]`
-- `nube category get <categoryId> [--fields FIELDS]`
 - `nube category create --name NAME [--parent ID] [--google-shopping-category CAT]`
 - `nube category update <categoryId> [--name NAME] [--parent ID] [--google-shopping-category CAT]`
 - `nube category delete <categoryId>`
@@ -219,8 +234,6 @@ Environment:
 - `nube customer <customerId> custom-fields list`
 - `nube customer <customerId> custom-fields values set [--id UUID --value VALUE]...`
 
-- `nube customer list [--since-id ID] [--q TEXT] [--email EMAIL] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--page N] [--per-page N] [--fields FIELDS]`
-- `nube customer get <customerId> [--fields FIELDS]`
 - `nube customer create --name NAME --email EMAIL [--phone PHONE] [--addresses JSON] [--send-email-invite] [--password PASS]`
 - `nube customer update <customerId> [--name NAME] [--email EMAIL] [--phone PHONE] [--note TEXT]`
 - `nube customer delete <customerId>`
@@ -268,8 +281,6 @@ Environment:
 - `nube order <orderId> custom-fields list`
 - `nube order <orderId> custom-fields values set [--id UUID --value VALUE]...`
 
-- `nube order list [--since-id ID] [--status any|open|closed|cancelled] [--payment-status any|pending|authorized|paid|abandoned|refunded|voided] [--shipping-status any|unpacked|unfulfilled|fulfilled] [--channels store|api|form|meli|pos] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--customer-ids IDs] [--q TEXT] [--page N] [--per-page N] [--fields FIELDS] [--aggregates fulfillment_orders|custom_fields]`
-- `nube order get <orderId> [--fields FIELDS] [--aggregates fulfillment_orders]`
 - `nube order history values <orderId> [--status PENDING|CANCELLED|PAID]`
 - `nube order history editions <orderId>`
 - `nube order create --gateway GATEWAY --products JSON --customer JSON --billing-address JSON --shipping-address JSON --shipping SHIPPING --shipping-option OPTION --shipping-pickup-type ship|pickup --shipping-cost-customer COST [--payment-status STATUS] [--currency CODE] [--language CODE] [--note TEXT] [--location-id ID]`
@@ -318,9 +329,6 @@ Environment:
 - `nube product variants delete <productId> <variantId>`
 - `nube product variants stock update <productId> --action replace|variation --value N [--id variantId]`
 
-- `nube product list [--ids IDs] [--since-id ID] [--q TEXT] [--handle HANDLE] [--category-id ID] [--published true|false] [--free-shipping true|false] [--created-at-min DATE] [--created-at-max DATE] [--updated-at-min DATE] [--updated-at-max DATE] [--sort-by CRITERIA] [--page N] [--per-page N] [--fields FIELDS]`
-- `nube product get <productId> [--fields FIELDS]`
-- `nube product get-by-sku <sku>`
 - `nube product create --name NAME [--description HTML] [--variants JSON] [--images JSON] [--categories IDs] [--brand BRAND] [--tags TAGS] [--published] [--free-shipping] [--seo-title TITLE] [--seo-description DESC]`
 - `nube product update <productId> [--name NAME] [--description HTML] [--published] [--categories IDs] [--tags TAGS]`
 - `nube product delete <productId>`
@@ -347,7 +355,6 @@ Environment:
 - `nube fulfillment create <orderId> --status STATUS --description DESC [--city CITY] [--province PROVINCE] [--country COUNTRY] [--happened-at DATE] [--estimated-delivery-at DATE]`
 - `nube fulfillment delete <orderId> <fulfillmentId>`
 
-- `nube store get [--fields FIELDS]`
 
 - `nube transaction list <orderId>`
 - `nube transaction get <orderId> <transactionId>`
@@ -402,6 +409,34 @@ Status code mapping:
 - **422**: `ValidationError` (field format) or `APIError` (business format)
 - **429**: Retried by `RetryTransport`; `RateLimitError` after exhausting retries
 - **5xx**: Retried by `RetryTransport`; `APIError` after exhausting retries
+
+## Stable exit codes
+
+Every error type maps to a specific exit code so agents and scripts can react reliably:
+
+| Code | Name | Condition |
+|------|------|-----------|
+| 0 | ok | Success |
+| 1 | error | Generic error |
+| 2 | usage | Invalid arguments or parse error |
+| 3 | auth_required | HTTP 401 |
+| 4 | not_found | HTTP 404 |
+| 5 | permission_denied | HTTP 403 |
+| 6 | rate_limited | HTTP 429 |
+| 7 | retryable | HTTP 5xx or circuit breaker |
+| 8 | config | Missing config or credentials |
+| 9 | cancelled | User cancelled |
+| 10 | payment_required | HTTP 402 |
+| 11 | validation | HTTP 422 |
+
+Machine-readable: `nube agent exit-codes --json`
+
+## Agent helpers
+
+- `nube agent exit-codes` — prints the stable exit code map (JSON/plain)
+- `nube schema` (`nube help-json`) — introspects the kong parser and emits a JSON schema of all commands, flags, and args
+- Desire paths — top-level shortcuts agents naturally guess: `nube shop`, `nube products`, `nube orders`, `nube status`, `nube login`
+- Command aliases — short forms: `prod`, `ord`, `cat`, `cust`
 
 ## Rate limiting
 

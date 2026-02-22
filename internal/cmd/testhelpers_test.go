@@ -18,11 +18,15 @@ import (
 
 // mockStore implements secrets.Store with an in-memory map.
 type mockStore struct {
-	items map[string]keyring.Item
+	items  map[string]keyring.Item
+	tokens map[string]secrets.Token
 }
 
 func newMockStore() *mockStore {
-	return &mockStore{items: make(map[string]keyring.Item)}
+	return &mockStore{
+		items:  make(map[string]keyring.Item),
+		tokens: make(map[string]secrets.Token),
+	}
 }
 
 func (s *mockStore) Keys() ([]string, error) {
@@ -36,19 +40,22 @@ func (s *mockStore) Keys() ([]string, error) {
 func (s *mockStore) SetToken(client, email string, tok secrets.Token) error {
 	key := secrets.TokenKey(client, email)
 	s.items[key] = keyring.Item{Key: key, Data: []byte(tok.AccessToken)}
+	s.tokens[key] = tok
 	return nil
 }
 
 func (s *mockStore) GetToken(client, email string) (secrets.Token, error) {
 	key := secrets.TokenKey(client, email)
-	item, ok := s.items[key]
-	if !ok {
+	if _, ok := s.items[key]; !ok {
 		return secrets.Token{}, keyring.ErrKeyNotFound
+	}
+	if tok, ok := s.tokens[key]; ok {
+		return tok, nil
 	}
 	return secrets.Token{
 		Client:      client,
 		Email:       email,
-		AccessToken: string(item.Data),
+		AccessToken: string(s.items[key].Data),
 		CreatedAt:   time.Now(),
 	}, nil
 }
@@ -56,22 +63,27 @@ func (s *mockStore) GetToken(client, email string) (secrets.Token, error) {
 func (s *mockStore) DeleteToken(client, email string) error {
 	key := secrets.TokenKey(client, email)
 	delete(s.items, key)
+	delete(s.tokens, key)
 	return nil
 }
 
 func (s *mockStore) ListTokens() ([]secrets.Token, error) {
 	var out []secrets.Token
-	for k, item := range s.items {
+	for k := range s.items {
 		client, email, ok := secrets.ParseTokenKey(k)
 		if !ok {
 			continue
 		}
-		out = append(out, secrets.Token{
-			Client:      client,
-			Email:       email,
-			AccessToken: string(item.Data),
-			CreatedAt:   time.Now(),
-		})
+		if tok, has := s.tokens[k]; has {
+			out = append(out, tok)
+		} else {
+			out = append(out, secrets.Token{
+				Client:      client,
+				Email:       email,
+				AccessToken: string(s.items[k].Data),
+				CreatedAt:   time.Now(),
+			})
+		}
 	}
 	return out, nil
 }
@@ -252,7 +264,7 @@ func runKong(t *testing.T, cmd any, args []string, ctx context.Context, flags *R
 					return
 				}
 
-				err = &ExitError{Code: ep.code, Err: errors.New("exited")}
+				err = &ExitErr{Code: ep.code, Err: errors.New("exited")}
 
 				return
 			}

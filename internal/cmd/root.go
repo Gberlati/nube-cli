@@ -42,9 +42,26 @@ type CLI struct {
 
 	Version kong.VersionFlag `help:"Print version and exit"`
 
-	Auth       AuthCmd    `cmd:"" help:"Auth and credentials"`
-	Config     ConfigCmd  `cmd:"" help:"Manage configuration"`
+	// Desire paths — agent-friendly shortcuts.
+	Shop     StoreGetCmd    `cmd:"" name:"shop" help:"Show store info (alias for 'store get')"`
+	Products ProductListCmd `cmd:"" name:"products" help:"List products (alias for 'product list')"`
+	Orders   OrderListCmd   `cmd:"" name:"orders" help:"List orders (alias for 'order list')"`
+	Status   AuthStatusCmd  `cmd:"" name:"status" help:"Show auth status (alias for 'auth status')"`
+	Login    AuthAddCmd     `cmd:"" name:"login" help:"Authorize account (alias for 'auth add')"`
+
+	// Domain commands.
+	Auth     AuthCmd     `cmd:"" help:"Auth and credentials"`
+	Store    StoreCmd    `cmd:"" help:"Store information"`
+	Product  ProductCmd  `cmd:"" aliases:"prod" help:"Manage products"`
+	Order    OrderCmd    `cmd:"" aliases:"ord" help:"Manage orders"`
+	Category CategoryCmd `cmd:"" aliases:"cat" help:"Manage categories"`
+	Customer CustomerCmd `cmd:"" aliases:"cust" help:"Manage customers"`
+	Config   ConfigCmd   `cmd:"" help:"Manage configuration"`
+	Agent    AgentCmd    `cmd:"" help:"Agent-friendly helpers"`
+	Schema   SchemaCmd   `cmd:"" help:"Machine-readable command schema" aliases:"help-json"`
+
 	VersionCmd VersionCmd `cmd:"" name:"version" help:"Print version"`
+	Help       HelpCmd    `cmd:"" help:"Show help (same as --help)"`
 }
 
 type exitPanic struct{ code int }
@@ -63,7 +80,7 @@ func Execute(args []string) (err error) {
 					return
 				}
 
-				err = &ExitError{Code: ep.code, Err: errors.New("exited")}
+				err = &ExitErr{Code: ep.code, Err: errors.New("exited")}
 
 				return
 			}
@@ -125,6 +142,7 @@ func Execute(args []string) (err error) {
 
 	kctx.BindTo(ctx, (*context.Context)(nil))
 	kctx.Bind(&cli.RootFlags)
+	kctx.Bind(parser)
 
 	err = kctx.Run()
 	if err == nil {
@@ -133,6 +151,12 @@ func Execute(args []string) (err error) {
 
 	if ExitCode(err) == 0 {
 		return nil
+	}
+
+	// Wrap with stable exit code if not already wrapped.
+	var ee *ExitErr
+	if !errors.As(err, &ee) {
+		err = &ExitErr{Code: stableExitCode(err), Err: err}
 	}
 
 	if u := ui.FromContext(ctx); u != nil {
@@ -159,7 +183,7 @@ func wrapParseError(err error) error {
 
 	var parseErr *kong.ParseError
 	if errors.As(err, &parseErr) {
-		return &ExitError{Code: 2, Err: parseErr}
+		return &ExitErr{Code: ExitUsage, Err: parseErr}
 	}
 
 	return err
@@ -178,7 +202,7 @@ func boolString(v bool) string {
 }
 
 func usagef(format string, args ...any) error {
-	return &ExitError{Code: 2, Err: fmt.Errorf(format, args...)}
+	return &ExitErr{Code: ExitUsage, Err: fmt.Errorf(format, args...)}
 }
 
 func newUsageError(err error) error {
@@ -186,7 +210,7 @@ func newUsageError(err error) error {
 		return nil
 	}
 
-	return &ExitError{Code: 2, Err: err}
+	return &ExitErr{Code: ExitUsage, Err: err}
 }
 
 func newParser(description string) (*kong.Kong, *CLI, error) {
