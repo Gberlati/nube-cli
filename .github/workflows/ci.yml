@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install tools
+        run: make tools
+      - name: Format check
+        run: make fmt-check
+      - name: Test
+        run: go test ./...
+      - name: Lint
+        run: make lint

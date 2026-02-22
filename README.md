@@ -30,6 +30,20 @@ Fast, agentic and script-friendly CLI for managing Tienda Nube stores from the t
 
 ## Installation
 
+### Build from Source
+
+```bash
+git clone https://github.com/gberlati/nube-cli.git
+cd nube-cli
+make
+```
+
+Run:
+
+```bash
+./bin/nube-cli --help
+```
+
 ## Quick Start
 
 ## Environment Variables
