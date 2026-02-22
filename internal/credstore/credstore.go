@@ -14,7 +14,7 @@ import (
 // StoreProfile holds credentials and metadata for a single Tienda Nube store.
 type StoreProfile struct {
 	StoreID     string   `json:"store_id"`
-	AccessToken string   `json:"access_token"`
+	AccessToken string   `json:"access_token"` //nolint:gosec // G101: field name, not a credential
 	Email       string   `json:"email,omitempty"`
 	Scopes      []string `json:"scopes,omitempty"`
 	CreatedAt   string   `json:"created_at,omitempty"`
@@ -43,7 +43,7 @@ var (
 func Path() (string, error) {
 	dir, err := config.Dir()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("config dir: %w", err)
 	}
 
 	return filepath.Join(dir, "credentials.json"), nil

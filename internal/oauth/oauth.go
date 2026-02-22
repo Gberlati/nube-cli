@@ -74,7 +74,7 @@ var (
 func defaultReadOAuthClient(name string) (clientCredentials, error) {
 	c, err := credstore.GetOAuthClient(name)
 	if err != nil {
-		return clientCredentials{}, err
+		return clientCredentials{}, fmt.Errorf("get oauth client: %w", err)
 	}
 
 	return clientCredentials{clientID: c.ClientID, clientSecret: c.ClientSecret}, nil

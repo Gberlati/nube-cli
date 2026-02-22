@@ -1,6 +1,7 @@
 package credstore
 
 import (
+	"errors"
 	"os"
 	"testing"
 )
@@ -74,6 +75,7 @@ func TestWrite_Permissions(t *testing.T) {
 	}
 
 	path, _ := Path()
+
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
@@ -314,10 +316,5 @@ func TestGetOAuthClient_Missing(t *testing.T) {
 }
 
 func isOAuthClientMissing(err error, target **OAuthClientMissingError) bool {
-	e, ok := err.(*OAuthClientMissingError)
-	if ok {
-		*target = e
-	}
-
-	return ok
+	return errors.As(err, target)
 }

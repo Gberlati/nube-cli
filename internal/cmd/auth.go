@@ -246,7 +246,7 @@ func (c *AuthCredentialsListCmd) Run(ctx context.Context, _ *RootFlags) error {
 	_, _ = fmt.Fprintln(w, "NAME")
 
 	for _, e := range entries {
-		_, _ = fmt.Fprintln(w, e.Name) //nolint:gosec // tabwriter, not HTML
+		_, _ = fmt.Fprintln(w, e.Name)
 	}
 
 	return nil
@@ -307,7 +307,7 @@ func (c *AuthListCmd) Run(ctx context.Context, _ *RootFlags) error {
 			def = "*"
 		}
 
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", it.Name, it.StoreID, def, it.CreatedAt) //nolint:gosec // tabwriter, not HTML
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", it.Name, it.StoreID, def, it.CreatedAt)
 	}
 
 	return nil
