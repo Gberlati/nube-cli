@@ -7,121 +7,20 @@ import (
 	"io"
 	"os"
 	"testing"
-	"time"
 
-	"github.com/99designs/keyring"
 	"github.com/alecthomas/kong"
 
-	"github.com/gberlati/nube-cli/internal/config"
-	"github.com/gberlati/nube-cli/internal/secrets"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
-// mockStore implements secrets.Store with an in-memory map.
-type mockStore struct {
-	items  map[string]keyring.Item
-	tokens map[string]secrets.Token
-}
-
-func newMockStore() *mockStore {
-	return &mockStore{
-		items:  make(map[string]keyring.Item),
-		tokens: make(map[string]secrets.Token),
-	}
-}
-
-func (s *mockStore) Keys() ([]string, error) {
-	out := make([]string, 0, len(s.items))
-	for k := range s.items {
-		out = append(out, k)
-	}
-	return out, nil
-}
-
-func (s *mockStore) SetToken(client, email string, tok secrets.Token) error {
-	key := secrets.TokenKey(client, email)
-	s.items[key] = keyring.Item{Key: key, Data: []byte(tok.AccessToken)}
-	s.tokens[key] = tok
-	return nil
-}
-
-func (s *mockStore) GetToken(client, email string) (secrets.Token, error) {
-	key := secrets.TokenKey(client, email)
-	if _, ok := s.items[key]; !ok {
-		return secrets.Token{}, keyring.ErrKeyNotFound
-	}
-	if tok, ok := s.tokens[key]; ok {
-		return tok, nil
-	}
-	return secrets.Token{
-		Client:      client,
-		Email:       email,
-		AccessToken: string(s.items[key].Data),
-		CreatedAt:   time.Now(),
-	}, nil
-}
-
-func (s *mockStore) DeleteToken(client, email string) error {
-	key := secrets.TokenKey(client, email)
-	delete(s.items, key)
-	delete(s.tokens, key)
-	return nil
-}
-
-func (s *mockStore) ListTokens() ([]secrets.Token, error) {
-	var out []secrets.Token
-	for k := range s.items {
-		client, email, ok := secrets.ParseTokenKey(k)
-		if !ok {
-			continue
-		}
-		if tok, has := s.tokens[k]; has {
-			out = append(out, tok)
-		} else {
-			out = append(out, secrets.Token{
-				Client:      client,
-				Email:       email,
-				AccessToken: string(s.items[k].Data),
-				CreatedAt:   time.Now(),
-			})
-		}
-	}
-	return out, nil
-}
-
-func (s *mockStore) GetDefaultAccount(_ string) (string, error) {
-	item, ok := s.items["default_account"]
-	if !ok {
-		return "", keyring.ErrKeyNotFound
-	}
-	return string(item.Data), nil
-}
-
-func (s *mockStore) SetDefaultAccount(_ string, email string) error {
-	s.items["default_account"] = keyring.Item{Key: "default_account", Data: []byte(email)}
-	return nil
-}
-
-// setupMockStore sets up a mock store and restores the original on cleanup.
-func setupMockStore(t *testing.T, tokens ...secrets.Token) *mockStore {
+// setupCredStore writes a credentials.json file for tests.
+func setupCredStore(t *testing.T, stores map[string]credstore.StoreProfile, defaultStore string) {
 	t.Helper()
-
-	store := newMockStore()
-
-	for _, tok := range tokens {
-		client := tok.Client
-		if client == "" {
-			client = config.DefaultClientName
-		}
-		_ = store.SetToken(client, tok.Email, tok)
+	setupConfigDir(t) // XDG_CONFIG_HOME → temp dir
+	f := credstore.File{DefaultStore: defaultStore, Stores: stores}
+	if err := credstore.Write(f); err != nil {
+		t.Fatalf("write test credentials: %v", err)
 	}
-
-	orig := openSecretsStore
-	openSecretsStore = func() (secrets.Store, error) {
-		return store, nil
-	}
-	t.Cleanup(func() { openSecretsStore = orig })
-
-	return store
 }
 
 // setupConfigDir sets XDG_CONFIG_HOME to a temp dir.

@@ -6,12 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gberlati/nube-cli/internal/secrets"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
 func TestOrderList_JSON(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{Email: "u@test.com", AccessToken: "tok"})
+	stores := map[string]credstore.StoreProfile{
+		"test": {StoreID: "123", AccessToken: "tok"},
+	}
+	setupCredStore(t, stores, "test")
 
 	setupMockAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -45,8 +47,10 @@ func TestOrderList_JSON(t *testing.T) {
 }
 
 func TestOrderGet_JSON(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{Email: "u@test.com", AccessToken: "tok"})
+	stores := map[string]credstore.StoreProfile{
+		"test": {StoreID: "123", AccessToken: "tok"},
+	}
+	setupCredStore(t, stores, "test")
 
 	setupMockAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.Path, "orders/101") {
@@ -84,8 +88,10 @@ func TestOrderGet_JSON(t *testing.T) {
 }
 
 func TestOrderList_Table(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{Email: "u@test.com", AccessToken: "tok"})
+	stores := map[string]credstore.StoreProfile{
+		"test": {StoreID: "123", AccessToken: "tok"},
+	}
+	setupCredStore(t, stores, "test")
 
 	setupMockAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

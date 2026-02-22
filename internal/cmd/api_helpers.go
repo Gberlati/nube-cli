@@ -7,15 +7,15 @@ import (
 	"os"
 
 	"github.com/gberlati/nube-cli/internal/api"
-	"github.com/gberlati/nube-cli/internal/config"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
-// newAPIClient composes account resolution + secrets store + api.New.
+// newAPIClient composes store resolution + api.New.
 // It is a package-level var so tests can swap it.
 var newAPIClient = defaultNewAPIClient
 
 func defaultNewAPIClient(flags *RootFlags) (*api.Client, error) {
-	// Fast path: env-var token bypasses keyring entirely.
+	// Fast path: env-var token bypasses credential file entirely.
 	if tok := os.Getenv("NUBE_ACCESS_TOKEN"); tok != "" {
 		userID := os.Getenv("NUBE_USER_ID")
 		if userID == "" {
@@ -25,28 +25,13 @@ func defaultNewAPIClient(flags *RootFlags) (*api.Client, error) {
 		return api.New(userID, tok), nil
 	}
 
-	// Standard path: open store once, resolve account, get token.
-	client, err := config.NormalizeClientNameOrDefault(flags.Client)
-	if err != nil {
-		return nil, err
-	}
-
-	store, err := openSecretsStore()
-	if err != nil {
-		return nil, err
-	}
-
-	email, err := requireAccountWithStore(flags, store)
-	if err != nil {
-		return nil, err
-	}
-
-	tok, err := store.GetToken(client, email)
+	// Standard path: resolve store profile.
+	_, profile, err := credstore.ResolveStore(flags.Store)
 	if err != nil {
 		return nil, &ExitErr{Code: ExitConfig, Err: err}
 	}
 
-	return api.New(tok.UserID, tok.AccessToken), nil
+	return api.New(profile.StoreID, profile.AccessToken), nil
 }
 
 // PaginationFlags embeds --page, --per-page for paginated list commands.

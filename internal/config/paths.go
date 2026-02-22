@@ -36,28 +36,6 @@ func EnsureDir() (string, error) {
 	return dir, nil
 }
 
-func KeyringDir() (string, error) {
-	dir, err := Dir()
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Join(dir, "keyring"), nil
-}
-
-func EnsureKeyringDir() (string, error) {
-	dir, err := KeyringDir()
-	if err != nil {
-		return "", err
-	}
-
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("ensure keyring dir: %w", err)
-	}
-
-	return dir, nil
-}
-
 func ConfigPath() (string, error) {
 	dir, err := Dir()
 	if err != nil {
@@ -65,28 +43,6 @@ func ConfigPath() (string, error) {
 	}
 
 	return filepath.Join(dir, "config.json"), nil
-}
-
-func ClientCredentialsPath() (string, error) {
-	return ClientCredentialsPathFor(DefaultClientName)
-}
-
-func ClientCredentialsPathFor(client string) (string, error) {
-	dir, err := Dir()
-	if err != nil {
-		return "", err
-	}
-
-	normalized, err := NormalizeClientNameOrDefault(client)
-	if err != nil {
-		return "", err
-	}
-
-	if normalized == DefaultClientName {
-		return filepath.Join(dir, "credentials.json"), nil
-	}
-
-	return filepath.Join(dir, fmt.Sprintf("credentials-%s.json", normalized)), nil
 }
 
 // ExpandPath expands ~ at the beginning of a path to the user's home directory.

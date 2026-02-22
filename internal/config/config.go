@@ -8,11 +8,10 @@ import (
 	"github.com/yosuke-furukawa/json5/encoding/json5"
 )
 
+// File holds non-credential configuration.
+// Currently empty after migration to credstore; kept for future non-secret settings.
 type File struct {
-	KeyringBackend string            `json:"keyring_backend,omitempty"`
-	AccountAliases map[string]string `json:"account_aliases,omitempty"`
-	AccountClients map[string]string `json:"account_clients,omitempty"`
-	ClientDomains  map[string]string `json:"client_domains,omitempty"`
+	ClientDomains map[string]string `json:"client_domains,omitempty"`
 }
 
 func WriteConfig(cfg File) error {

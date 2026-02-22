@@ -7,11 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/99designs/keyring"
 	"github.com/alecthomas/kong"
 
 	"github.com/gberlati/nube-cli/internal/api"
-	"github.com/gberlati/nube-cli/internal/config"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
 func Format(err error) string {
@@ -24,12 +23,9 @@ func Format(err error) string {
 		return formatParseError(parseErr)
 	}
 
-	var credErr *config.CredentialsMissingError
+	var credErr *credstore.OAuthClientMissingError
 	if errors.As(err, &credErr) {
-		return fmt.Sprintf(
-			"OAuth client credentials missing.\nCreate an app at https://partners.tiendanube.com and save credentials.\nThen run: nube auth credentials <credentials.json> (expected at %s)",
-			credErr.Path,
-		)
+		return "OAuth client credentials missing.\nCreate an app at https://partners.tiendanube.com and save credentials.\nThen run: nube auth credentials <credentials.json>"
 	}
 
 	var apiErr *api.APIError
@@ -39,7 +35,7 @@ func Format(err error) string {
 
 	var authErr *api.AuthError
 	if errors.As(err, &authErr) {
-		return "Authentication failed. Check your access token or run: nube auth add <email>"
+		return "Authentication failed. Check your access token or run: nube login"
 	}
 
 	var rateLimitErr *api.RateLimitError
@@ -74,10 +70,6 @@ func Format(err error) string {
 	var cbErr *api.CircuitBreakerError
 	if errors.As(err, &cbErr) {
 		return "API temporarily unavailable (circuit breaker open). Try again shortly."
-	}
-
-	if errors.Is(err, keyring.ErrKeyNotFound) {
-		return "Token not found in keyring. Run: nube auth add <email>"
 	}
 
 	if errors.Is(err, os.ErrNotExist) {

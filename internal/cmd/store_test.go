@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gberlati/nube-cli/internal/api"
-	"github.com/gberlati/nube-cli/internal/secrets"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
 func setupMockAPIClient(t *testing.T, handler http.Handler) {
@@ -25,8 +25,10 @@ func setupMockAPIClient(t *testing.T, handler http.Handler) {
 }
 
 func TestStoreGet_JSON(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{Email: "u@test.com", AccessToken: "tok"})
+	stores := map[string]credstore.StoreProfile{
+		"test": {StoreID: "123", AccessToken: "tok"},
+	}
+	setupCredStore(t, stores, "test")
 
 	setupMockAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -56,8 +58,10 @@ func TestStoreGet_JSON(t *testing.T) {
 }
 
 func TestStoreGet_Human(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{Email: "u@test.com", AccessToken: "tok"})
+	stores := map[string]credstore.StoreProfile{
+		"test": {StoreID: "123", AccessToken: "tok"},
+	}
+	setupCredStore(t, stores, "test")
 
 	setupMockAPIClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gberlati/nube-cli/internal/credstore"
 	"github.com/gberlati/nube-cli/internal/oauth"
-	"github.com/gberlati/nube-cli/internal/secrets"
 )
 
 func mockAuthorizeOAuth(t *testing.T, tok oauth.TokenResponse, err error) {
@@ -22,9 +20,8 @@ func mockAuthorizeOAuth(t *testing.T, tok oauth.TokenResponse, err error) {
 	t.Cleanup(func() { authorizeOAuth = orig })
 }
 
-func TestAuthAdd_Success(t *testing.T) {
+func TestLogin_Success(t *testing.T) {
 	setupConfigDir(t)
-	setupMockStore(t)
 	mockAuthorizeOAuth(t, oauth.TokenResponse{
 		AccessToken: "tok-123",
 		UserID:      "999",
@@ -32,20 +29,29 @@ func TestAuthAdd_Success(t *testing.T) {
 	}, nil)
 
 	buf := captureStdout(t)
-	err := Execute([]string{"auth", "add", "user@example.com"})
+	err := Execute([]string{"login", "my-shop"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "user@example.com") {
-		t.Errorf("output = %q, want containing email", output)
+	if !strings.Contains(output, "my-shop") {
+		t.Errorf("output = %q, want containing profile name", output)
+	}
+
+	// Verify stored.
+	p, getErr := credstore.GetStore("my-shop")
+	if getErr != nil {
+		t.Fatalf("GetStore: %v", getErr)
+	}
+
+	if p.AccessToken != "tok-123" {
+		t.Errorf("AccessToken = %q", p.AccessToken)
 	}
 }
 
-func TestAuthAdd_JSON(t *testing.T) {
+func TestLogin_JSON(t *testing.T) {
 	setupConfigDir(t)
-	setupMockStore(t)
 	mockAuthorizeOAuth(t, oauth.TokenResponse{
 		AccessToken: "tok",
 		UserID:      "1",
@@ -53,7 +59,7 @@ func TestAuthAdd_JSON(t *testing.T) {
 	}, nil)
 
 	buf := captureStdout(t)
-	err := Execute([]string{"auth", "add", "user@example.com", "--json"})
+	err := Execute([]string{"login", "shop", "--json"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -68,31 +74,38 @@ func TestAuthAdd_JSON(t *testing.T) {
 	}
 }
 
-func TestAuthAdd_EmptyEmail(t *testing.T) {
+func TestLogin_AutoName(t *testing.T) {
 	setupConfigDir(t)
-	_ = captureStdout(t)
+	mockAuthorizeOAuth(t, oauth.TokenResponse{
+		AccessToken: "tok",
+		UserID:      "42",
+	}, nil)
 
-	err := Execute([]string{"auth", "add", ""})
-	if err == nil {
-		t.Fatal("expected error for empty email")
+	buf := captureStdout(t)
+	err := Execute([]string{"login"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "store-42") {
+		t.Errorf("output = %q, want containing auto-generated name", output)
 	}
 }
 
-func TestAuthAdd_OAuthError(t *testing.T) {
+func TestLogin_OAuthError(t *testing.T) {
 	setupConfigDir(t)
-	setupMockStore(t)
 	mockAuthorizeOAuth(t, oauth.TokenResponse{}, errors.New("oauth failed"))
 
 	_ = captureStdout(t)
-	err := Execute([]string{"auth", "add", "user@example.com"})
+	err := Execute([]string{"login", "test"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
-func TestAuthAdd_BrokerURL(t *testing.T) {
+func TestLogin_BrokerURL(t *testing.T) {
 	setupConfigDir(t)
-	setupMockStore(t)
 
 	var capturedOpts oauth.AuthorizeOptions
 
@@ -107,7 +120,7 @@ func TestAuthAdd_BrokerURL(t *testing.T) {
 	t.Cleanup(func() { authorizeOAuth = orig })
 
 	_ = captureStdout(t)
-	err := Execute([]string{"auth", "add", "user@example.com", "--broker-url", "http://broker.test"})
+	err := Execute([]string{"login", "test", "--broker-url", "http://broker.test"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -118,12 +131,10 @@ func TestAuthAdd_BrokerURL(t *testing.T) {
 }
 
 func TestAuthList(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "user@example.com",
-		AccessToken: "tok",
-	})
+	stores := map[string]credstore.StoreProfile{
+		"my-shop": {StoreID: "123", AccessToken: "tok"},
+	}
+	setupCredStore(t, stores, "my-shop")
 
 	buf := captureStdout(t)
 	err := Execute([]string{"auth", "list"})
@@ -131,55 +142,33 @@ func TestAuthList(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 
-	if !strings.Contains(buf.String(), "user@example.com") {
-		t.Errorf("output = %q, want containing email", buf.String())
+	if !strings.Contains(buf.String(), "my-shop") {
+		t.Errorf("output = %q, want containing store name", buf.String())
 	}
 }
 
-func TestAuthRemove(t *testing.T) {
-	setupConfigDir(t)
-	store := setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "user@example.com",
-		AccessToken: "tok",
-	})
+func TestLogout(t *testing.T) {
+	stores := map[string]credstore.StoreProfile{
+		"my-shop": {StoreID: "123", AccessToken: "tok"},
+	}
+	setupCredStore(t, stores, "my-shop")
 
 	buf := captureStdout(t)
-	err := Execute([]string{"auth", "remove", "user@example.com", "--force"})
+	err := Execute([]string{"logout", "my-shop", "--force"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
 	_ = buf.String()
 
-	// Verify token was deleted
-	_, getErr := store.GetToken("default", "user@example.com")
+	// Verify deleted.
+	_, getErr := credstore.GetStore("my-shop")
 	if getErr == nil {
-		t.Error("expected token to be deleted")
-	}
-}
-
-func TestAuthTokensList(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "user@example.com",
-		AccessToken: "tok",
-	})
-
-	buf := captureStdout(t)
-	err := Execute([]string{"auth", "tokens", "list"})
-	if err != nil {
-		t.Fatalf("error = %v", err)
-	}
-
-	if !strings.Contains(buf.String(), "user@example.com") {
-		t.Errorf("output = %q", buf.String())
+		t.Error("expected store to be deleted")
 	}
 }
 
 func TestAuthStatus(t *testing.T) {
 	setupConfigDir(t)
-	setupMockStore(t)
 
 	buf := captureStdout(t)
 	err := Execute([]string{"auth", "status"})
@@ -187,22 +176,19 @@ func TestAuthStatus(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 
-	if !strings.Contains(buf.String(), "config") {
-		t.Errorf("output = %q, want containing 'config'", buf.String())
+	if !strings.Contains(buf.String(), "credentials") {
+		t.Errorf("output = %q, want containing 'credentials'", buf.String())
 	}
 }
 
 func TestAuthToken_Plain(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "user@example.com",
-		UserID:      "999",
-		AccessToken: "secret-tok",
-	})
+	stores := map[string]credstore.StoreProfile{
+		"my-shop": {StoreID: "999", AccessToken: "secret-tok"},
+	}
+	setupCredStore(t, stores, "my-shop")
 
 	buf := captureStdout(t)
-	err := Execute([]string{"auth", "token", "user@example.com"})
+	err := Execute([]string{"auth", "token", "my-shop"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -214,16 +200,13 @@ func TestAuthToken_Plain(t *testing.T) {
 }
 
 func TestAuthToken_JSON(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "user@example.com",
-		UserID:      "999",
-		AccessToken: "secret-tok",
-	})
+	stores := map[string]credstore.StoreProfile{
+		"my-shop": {StoreID: "999", AccessToken: "secret-tok"},
+	}
+	setupCredStore(t, stores, "my-shop")
 
 	buf := captureStdout(t)
-	err := Execute([]string{"auth", "token", "user@example.com", "--json"})
+	err := Execute([]string{"auth", "token", "my-shop", "--json"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -237,26 +220,19 @@ func TestAuthToken_JSON(t *testing.T) {
 		t.Errorf("access_token = %v", got["access_token"])
 	}
 
-	if got["user_id"] != "999" {
-		t.Errorf("user_id = %v", got["user_id"])
-	}
-
-	if got["email"] != "user@example.com" {
-		t.Errorf("email = %v", got["email"])
+	if got["store_id"] != "999" {
+		t.Errorf("store_id = %v", got["store_id"])
 	}
 }
 
-func TestAuthToken_DefaultAccount(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "only@example.com",
-		UserID:      "111",
-		AccessToken: "only-tok",
-	})
+func TestAuthToken_DefaultStore(t *testing.T) {
+	stores := map[string]credstore.StoreProfile{
+		"only": {StoreID: "111", AccessToken: "only-tok"},
+	}
+	setupCredStore(t, stores, "only")
 
 	buf := captureStdout(t)
-	// No email arg — should auto-resolve to the single stored account.
+	// No name arg — should auto-resolve to the single stored profile.
 	err := Execute([]string{"auth", "token"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
@@ -268,77 +244,22 @@ func TestAuthToken_DefaultAccount(t *testing.T) {
 	}
 }
 
-func TestAuthToken_Export(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "user@example.com",
-		UserID:      "999",
-		AccessToken: "secret-tok",
-	})
-
-	dir := t.TempDir()
-	envFile := filepath.Join(dir, ".env")
-
-	_ = captureStdout(t)
-	err := Execute([]string{"auth", "token", "user@example.com", "--export", envFile})
-	if err != nil {
-		t.Fatalf("error = %v", err)
+func TestAuthDefault(t *testing.T) {
+	stores := map[string]credstore.StoreProfile{
+		"a": {StoreID: "1", AccessToken: "ta"},
+		"b": {StoreID: "2", AccessToken: "tb"},
 	}
-
-	content, readErr := os.ReadFile(envFile)
-	if readErr != nil {
-		t.Fatalf("read env file: %v", readErr)
-	}
-
-	got := string(content)
-	if !strings.Contains(got, "NUBE_ACCESS_TOKEN=secret-tok") {
-		t.Errorf("env file missing NUBE_ACCESS_TOKEN, got: %q", got)
-	}
-
-	if !strings.Contains(got, "NUBE_USER_ID=999") {
-		t.Errorf("env file missing NUBE_USER_ID, got: %q", got)
-	}
-
-	// Check file permissions.
-	info, statErr := os.Stat(envFile)
-	if statErr != nil {
-		t.Fatalf("stat: %v", statErr)
-	}
-
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("file perm = %o, want 0600", perm)
-	}
-}
-
-func TestAuthToken_ExportJSON(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "user@example.com",
-		UserID:      "999",
-		AccessToken: "secret-tok",
-	})
-
-	dir := t.TempDir()
-	envFile := filepath.Join(dir, ".env")
+	setupCredStore(t, stores, "a")
 
 	buf := captureStdout(t)
-	err := Execute([]string{"auth", "token", "user@example.com", "--export", envFile, "--json"})
+	err := Execute([]string{"auth", "default", "b"})
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
+	_ = buf.String()
 
-	var got map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v (output: %q)", err, buf.String())
-	}
-
-	if got["exported"] != true {
-		t.Errorf("exported = %v", got["exported"])
-	}
-
-	if got["path"] != envFile {
-		t.Errorf("path = %v", got["path"])
+	f, _ := credstore.Read()
+	if f.DefaultStore != "b" {
+		t.Errorf("DefaultStore = %q, want %q", f.DefaultStore, "b")
 	}
 }

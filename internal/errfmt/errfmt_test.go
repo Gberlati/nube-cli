@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/gberlati/nube-cli/internal/api"
-	"github.com/gberlati/nube-cli/internal/config"
+	"github.com/gberlati/nube-cli/internal/credstore"
 	"github.com/gberlati/nube-cli/internal/errfmt"
 )
 
@@ -50,14 +50,9 @@ func TestFormat(t *testing.T) {
 			contains: "product not found: 42",
 		},
 		{
-			name:     "credentials missing",
-			err:      &config.CredentialsMissingError{Path: "/home/test/.config/nube-cli/credentials.json"},
+			name:     "oauth client missing",
+			err:      &credstore.OAuthClientMissingError{Name: "default"},
 			contains: "OAuth client credentials missing",
-		},
-		{
-			name:     "credentials missing contains path",
-			err:      &config.CredentialsMissingError{Path: "/expected/path"},
-			contains: "/expected/path",
 		},
 		{
 			name:     "validation error",

@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/gberlati/nube-cli/internal/secrets"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
 func TestPaginationFlags_Apply(t *testing.T) {
@@ -65,14 +65,12 @@ func TestAddQueryParam(t *testing.T) {
 	}
 }
 
-func TestDefaultNewAPIClient_EnvVarBypassesKeyring(t *testing.T) {
+func TestDefaultNewAPIClient_EnvVarBypassesCredStore(t *testing.T) {
 	setupConfigDir(t)
 
 	t.Setenv("NUBE_ACCESS_TOKEN", "env-token-abc")
 	t.Setenv("NUBE_USER_ID", "42")
 
-	// Call defaultNewAPIClient directly — it should return a client
-	// without opening the keyring.
 	client, err := defaultNewAPIClient(&RootFlags{})
 	if err != nil {
 		t.Fatalf("error = %v", err)
@@ -83,22 +81,16 @@ func TestDefaultNewAPIClient_EnvVarBypassesKeyring(t *testing.T) {
 	}
 }
 
-func TestDefaultNewAPIClient_StandardPathUsesKeyring(t *testing.T) {
-	setupConfigDir(t)
+func TestDefaultNewAPIClient_StandardPathUsesCredStore(t *testing.T) {
+	stores := map[string]credstore.StoreProfile{
+		"test": {StoreID: "123", AccessToken: "stored-token"},
+	}
+	setupCredStore(t, stores, "test")
 
 	// Ensure env vars are clear.
 	t.Setenv("NUBE_ACCESS_TOKEN", "")
 	t.Setenv("NUBE_USER_ID", "")
 
-	setupMockStore(t, secrets.Token{
-		Client:      "default",
-		Email:       "u@test.com",
-		UserID:      "123",
-		AccessToken: "stored-token",
-	})
-
-	// Call defaultNewAPIClient directly — standard path should resolve
-	// the account and token from the mock keyring.
 	client, err := defaultNewAPIClient(&RootFlags{})
 	if err != nil {
 		t.Fatalf("error = %v", err)
@@ -120,8 +112,8 @@ func TestExtractI18n(t *testing.T) {
 	}{
 		{"plain string", map[string]any{"name": "Test"}, "name", "Test"},
 		{"missing key", map[string]any{}, "name", ""},
-		{"es preferred", map[string]any{"name": map[string]any{"es": "Hola", "pt": "Olá", "en": "Hello"}}, "name", "Hola"},
-		{"fallback to pt", map[string]any{"name": map[string]any{"pt": "Olá", "en": "Hello"}}, "name", "Olá"},
+		{"es preferred", map[string]any{"name": map[string]any{"es": "Hola", "pt": "Ola", "en": "Hello"}}, "name", "Hola"},
+		{"fallback to pt", map[string]any{"name": map[string]any{"pt": "Ola", "en": "Hello"}}, "name", "Ola"},
 		{"fallback to en", map[string]any{"name": map[string]any{"en": "Hello"}}, "name", "Hello"},
 		{"fallback to first", map[string]any{"name": map[string]any{"fr": "Bonjour"}}, "name", "Bonjour"},
 		{"empty i18n map", map[string]any{"name": map[string]any{}}, "name", ""},

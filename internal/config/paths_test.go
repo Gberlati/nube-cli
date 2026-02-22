@@ -33,46 +33,6 @@ func TestConfigPath(t *testing.T) {
 	}
 }
 
-func TestClientCredentialsPath(t *testing.T) {
-	setupConfigDir(t)
-
-	p, err := ClientCredentialsPath()
-	if err != nil {
-		t.Fatalf("ClientCredentialsPath() error = %v", err)
-	}
-
-	if !strings.HasSuffix(p, "credentials.json") {
-		t.Errorf("ClientCredentialsPath() = %q, want suffix credentials.json", p)
-	}
-}
-
-func TestClientCredentialsPathFor(t *testing.T) {
-	setupConfigDir(t)
-
-	tests := []struct {
-		name   string
-		client string
-		suffix string
-	}{
-		{"default", "default", "credentials.json"},
-		{"empty defaults", "", "credentials.json"},
-		{"named client", "myapp", "credentials-myapp.json"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p, err := ClientCredentialsPathFor(tt.client)
-			if err != nil {
-				t.Fatalf("ClientCredentialsPathFor(%q) error = %v", tt.client, err)
-			}
-
-			if !strings.HasSuffix(p, tt.suffix) {
-				t.Errorf("path = %q, want suffix %q", p, tt.suffix)
-			}
-		})
-	}
-}
-
 func TestEnsureDir(t *testing.T) {
 	setupConfigDir(t)
 

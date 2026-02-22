@@ -11,10 +11,9 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/gberlati/nube-cli/internal/config"
+	"github.com/gberlati/nube-cli/internal/credstore"
 	"github.com/gberlati/nube-cli/internal/errfmt"
 	"github.com/gberlati/nube-cli/internal/outfmt"
-	"github.com/gberlati/nube-cli/internal/secrets"
 	"github.com/gberlati/nube-cli/internal/ui"
 )
 
@@ -25,12 +24,11 @@ const (
 
 type RootFlags struct {
 	Color          string `help:"Color output: auto|always|never" default:"${color}"`
-	Account        string `help:"Account email for API commands" aliases:"acct" short:"a"`
-	Client         string `help:"OAuth client name (selects stored credentials + token bucket)" default:"${client}"`
+	Store          string `help:"Store profile name" short:"s" env:"NUBE_STORE"`
 	EnableCommands string `help:"Comma-separated list of enabled top-level commands (restricts CLI)" default:"${enabled_commands}"`
 	JSON           bool   `help:"Output JSON to stdout (best for scripting)" default:"${json}" short:"j"`
 	Plain          bool   `help:"Output stable, parseable text to stdout (TSV; no colors)" default:"${plain}" short:"p"`
-	Select         string `help:"Comma-separated list of fields to select from JSON output (supports dot paths)" short:"s"`
+	Select         string `help:"Comma-separated list of fields to select from JSON output (supports dot paths)" short:"S"`
 	Force          bool   `help:"Skip confirmations for destructive commands" aliases:"yes,assume-yes" short:"y"`
 	NoInput        bool   `help:"Never prompt; fail instead (useful for CI)" aliases:"non-interactive,noninteractive"`
 	DryRun         bool   `help:"Show what would be done without executing" short:"n"`
@@ -47,7 +45,8 @@ type CLI struct {
 	Products ProductListCmd `cmd:"" name:"products" help:"List products (alias for 'product list')"`
 	Orders   OrderListCmd   `cmd:"" name:"orders" help:"List orders (alias for 'order list')"`
 	Status   AuthStatusCmd  `cmd:"" name:"status" help:"Show auth status (alias for 'auth status')"`
-	Login    AuthAddCmd     `cmd:"" name:"login" help:"Authorize account (alias for 'auth add')"`
+	Login    LoginCmd       `cmd:"" name:"login" help:"Authorize and store a profile"`
+	Logout   LogoutCmd      `cmd:"" name:"logout" help:"Remove a store profile"`
 
 	// Domain commands.
 	Auth     AuthCmd     `cmd:"" help:"Auth and credentials"`
@@ -217,7 +216,6 @@ func newParser(description string) (*kong.Kong, *CLI, error) {
 	envMode := outfmt.FromEnv()
 	vars := kong.Vars{
 		"color":            envOr("NUBE_COLOR", colorAuto),
-		"client":           envOr("NUBE_CLIENT", ""),
 		"enabled_commands": envOr("NUBE_ENABLE_COMMANDS", ""),
 		"json":             boolString(envMode.JSON),
 		"plain":            boolString(envMode.Plain),
@@ -247,23 +245,14 @@ func baseDescription() string {
 func helpDescription() string {
 	desc := baseDescription()
 
-	configPath, err := config.ConfigPath()
-	configLine := "unknown"
+	credPath, err := credstore.Path()
+	credLine := "unknown"
 
 	if err != nil {
-		configLine = fmt.Sprintf("error: %v", err)
-	} else if configPath != "" {
-		configLine = configPath
+		credLine = fmt.Sprintf("error: %v", err)
+	} else if credPath != "" {
+		credLine = credPath
 	}
 
-	backendInfo, err := secrets.ResolveKeyringBackendInfo()
-	var backendLine string
-
-	if err != nil {
-		backendLine = fmt.Sprintf("error: %v", err)
-	} else if backendInfo.Value != "" {
-		backendLine = fmt.Sprintf("%s (source: %s)", backendInfo.Value, backendInfo.Source)
-	}
-
-	return fmt.Sprintf("%s\n\nConfig:\n  file: %s\n  keyring backend: %s", desc, configLine, backendLine)
+	return fmt.Sprintf("%s\n\nCredentials: %s", desc, credLine)
 }
