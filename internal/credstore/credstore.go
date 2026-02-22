@@ -34,9 +34,9 @@ type File struct {
 }
 
 var (
-	errNoStore          = errors.New("no store profile configured; run `nube login` first")
-	errStoreNotFound    = errors.New("store profile not found")
-	errAmbiguousStore   = errors.New("multiple store profiles exist; use --store to select one")
+	errNoStore        = errors.New("no store profile configured; run `nube login` first")
+	errStoreNotFound  = errors.New("store profile not found")
+	errAmbiguousStore = errors.New("multiple store profiles exist; use --store to select one")
 )
 
 // Path returns the path to credentials.json.
