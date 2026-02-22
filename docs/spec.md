@@ -57,13 +57,13 @@ Implementation: `internal/ui/ui.go`.
 
 Implementation: `internal/config/*`.
 
-### Refresh tokens (secrets)
+### Access tokens (secrets)
 
 - Stored in OS credential store via `github.com/99designs/keyring`.
 - Key namespace is `nube-cli` (keyring `ServiceName`).
 - Key format: `token:<client>:<email>` (default client uses `token:default:<email>`)
 - Legacy key format: `token:<email>` (migrated on first read)
-- Stored payload is JSON (refresh token).
+- Stored payload is JSON (access token).
 - Fallback: if no OS credential store is available, keyring may use its encrypted "file" backend:
   - Directory: `$(os.UserConfigDir())/nube-cli/keyring/` (one file per key)
   - Password: prompts on TTY; for non-interactive runs set `NUBE_KEYRING_PASSWORD`
@@ -91,9 +91,9 @@ Implementation: `internal/secrets/store.go`.
   - `credentials.json` (OAuth client id/secret; default client)
   - `credentials-<client>.json` (OAuth client id/secret; named clients)
 - Secrets:
-  - refresh tokens in keyring
+  - access tokens in keyring
 
-We intentionally avoid storing refresh tokens in plain JSON on disk.
+We intentionally avoid storing access tokens in plain JSON on disk.
 
 Environment:
 
@@ -105,25 +105,10 @@ Environment:
 - `config.json` can also set `account_aliases` for `nube auth alias` (JSON5)
 - `config.json` can also set `account_clients` (email -> client) and `client_domains` (domain -> client)
 
-Flag aliases:
-- `--out` also accepts `--output`.
-- `--out-dir` also accepts `--output-dir`. 
-
 ## Commands (current + planned)
 
-### Planned
+### Implemented
 
-- `nube auth credentials <credentials.json>`
-- `nube auth credentials list`
-- `nube --client <name> auth credentials <credentials.json>`
-- `nube auth list`
-- `nube auth alias list`
-- `nube auth alias set <alias> <email>`
-- `nube auth alias unset <alias>`
-- `nube auth status`
-- `nube auth remove <email>`
-- `nube auth tokens list`
-- `nube auth tokens delete <email>`
 - `nube config keys`
 - `nube config get <key>`
 - `nube config list`
@@ -131,6 +116,20 @@ Flag aliases:
 - `nube config set <key> <value>`
 - `nube config unset <key>`
 - `nube version`
+- `nube auth credentials <credentials.json>` — store OAuth client credentials
+- `nube auth credentials list` — list stored credentials
+- `nube --client <name> auth credentials <credentials.json>` — store named client credentials
+- `nube auth add <email>` — OAuth flow to obtain and store access token
+- `nube auth list` — list stored accounts
+- `nube auth alias list` — list account aliases
+- `nube auth alias set <alias> <email>` — create account alias
+- `nube auth alias unset <alias>` — remove account alias
+- `nube auth status` — show auth config, keyring backend, resolved account
+- `nube auth remove <email>` — remove stored token (with confirmation)
+- `nube auth tokens list` — list raw keyring keys
+- `nube auth tokens delete <email>` — delete stored token (with confirmation)
+
+### Planned
 
 - `nube abandoned-checkout list [--since-id ID] [--created-at-max DATE] [--updated-at-max DATE] [--page N] [--per-page N] [--fields FIELDS]`
 - `nube abandoned-checkout get <checkoutId>`
@@ -347,8 +346,12 @@ We avoid heavy table deps unless we decide we need them.
 - `cmd/nube/main.go` — binary entrypoint
 - `internal/cmd/*` — kong command structs
 - `internal/ui/*` — color + printing
-- `internal/config/*` — config paths + credential parsing/writing
+- `internal/outfmt/*` — output mode (JSON/plain) + JSON encoder
+- `internal/errfmt/*` — user-friendly error formatting
+- `internal/config/*` — config paths + credential parsing/writing + aliases
 - `internal/secrets/*` — keyring store
+- `internal/api/*` — Tienda Nube API client (HTTP client, retry transport, error types, pagination)
+- `internal/oauth/*` — OAuth 2.0 flow (browser, manual, remote 2-step)
 
 ## Formatting, linting, tests
 

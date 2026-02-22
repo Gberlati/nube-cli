@@ -9,6 +9,7 @@ import (
 	"github.com/99designs/keyring"
 	"github.com/alecthomas/kong"
 
+	"github.com/gberlati/nube-cli/internal/api"
 	"github.com/gberlati/nube-cli/internal/config"
 )
 
@@ -28,6 +29,26 @@ func Format(err error) string {
 			"OAuth client credentials missing.\nCreate an app at https://partners.tiendanube.com and save credentials.\nThen run: nube auth credentials <credentials.json> (expected at %s)",
 			credErr.Path,
 		)
+	}
+
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("API error (HTTP %d): %s", apiErr.StatusCode, apiErr.Message)
+	}
+
+	var authErr *api.AuthError
+	if errors.As(err, &authErr) {
+		return "Authentication failed. Check your access token or run: nube auth add <email>"
+	}
+
+	var rateLimitErr *api.RateLimitError
+	if errors.As(err, &rateLimitErr) {
+		return fmt.Sprintf("Rate limit exceeded after %d retries. Try again in a few seconds.", rateLimitErr.Retries)
+	}
+
+	var notFoundErr *api.NotFoundError
+	if errors.As(err, &notFoundErr) {
+		return notFoundErr.Error()
 	}
 
 	if errors.Is(err, keyring.ErrKeyNotFound) {

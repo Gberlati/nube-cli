@@ -402,8 +402,13 @@ func ParseTokenKey(k string) (client string, email string, ok bool) {
 	return parts[0], parts[1], true
 }
 
-func tokenKey(client string, email string) string {
+// TokenKey returns the keyring key for a client+email pair.
+func TokenKey(client string, email string) string {
 	return fmt.Sprintf("token:%s:%s", client, email)
+}
+
+func tokenKey(client string, email string) string {
+	return TokenKey(client, email)
 }
 
 func legacyTokenKey(email string) string {

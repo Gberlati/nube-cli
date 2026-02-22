@@ -32,6 +32,7 @@ type RootFlags struct {
 	Plain          bool   `help:"Output stable, parseable text to stdout (TSV; no colors)" default:"${plain}" short:"p"`
 	Force          bool   `help:"Skip confirmations for destructive commands" aliases:"yes,assume-yes" short:"y"`
 	NoInput        bool   `help:"Never prompt; fail instead (useful for CI)" aliases:"non-interactive,noninteractive"`
+	DryRun         bool   `help:"Show what would be done without executing" short:"n"`
 	Verbose        bool   `help:"Enable verbose logging" short:"v"`
 }
 
@@ -40,6 +41,7 @@ type CLI struct {
 
 	Version kong.VersionFlag `help:"Print version and exit"`
 
+	Auth       AuthCmd    `cmd:"" help:"Auth and credentials"`
 	Config     ConfigCmd  `cmd:"" help:"Manage configuration"`
 	VersionCmd VersionCmd `cmd:"" name:"version" help:"Print version"`
 }
