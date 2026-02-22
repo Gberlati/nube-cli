@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gberlati/nube-cli/internal/config"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 // AuthorizeOptions configures the OAuth flow.
 type AuthorizeOptions struct {
 	Timeout   time.Duration
-	Client    string
+	OAuthApp  string
 	BrokerURL string
 }
 
@@ -54,6 +54,12 @@ type authResult struct {
 	userID string // broker flow: user ID
 }
 
+// clientCredentials holds OAuth client ID and secret for the native flow.
+type clientCredentials struct {
+	clientID     string
+	clientSecret string
+}
+
 var (
 	errMissingCode   = errors.New("missing authorization code")
 	errStateMismatch = errors.New("state mismatch (possible CSRF attack)")
@@ -61,9 +67,18 @@ var (
 	errTokenExchange = errors.New("token exchange failed")
 	errNoAccessToken = errors.New("no access token in response")
 
-	readClientCredentials = config.ReadClientCredentialsFor
-	openBrowserFn         = openBrowser
+	readOAuthClient = defaultReadOAuthClient
+	openBrowserFn   = openBrowser
 )
+
+func defaultReadOAuthClient(name string) (clientCredentials, error) {
+	c, err := credstore.GetOAuthClient(name)
+	if err != nil {
+		return clientCredentials{}, fmt.Errorf("get oauth client: %w", err)
+	}
+
+	return clientCredentials{clientID: c.ClientID, clientSecret: c.ClientSecret}, nil
+}
 
 // Authorize runs the Tienda Nube OAuth2 flow and returns a TokenResponse.
 func Authorize(ctx context.Context, opts AuthorizeOptions) (TokenResponse, error) {
@@ -77,17 +92,22 @@ func Authorize(ctx context.Context, opts AuthorizeOptions) (TokenResponse, error
 	brokerURL := opts.BrokerURL
 	if brokerURL != "" {
 		// Broker flow — no local credentials needed.
-		return authorizeServer(ctx, opts, config.ClientCredentials{}, brokerURL)
+		return authorizeServer(ctx, opts, clientCredentials{}, brokerURL)
 	}
 
 	// Try native flow — requires local credentials.
-	creds, err := readClientCredentials(opts.Client)
+	appName := opts.OAuthApp
+	if appName == "" {
+		appName = "default"
+	}
+
+	creds, err := readOAuthClient(appName)
 	if err != nil {
 		// No credentials and no broker URL explicitly set — fall back to default broker.
 		if DefaultBrokerURL != "" {
-			var credErr *config.CredentialsMissingError
+			var credErr *credstore.OAuthClientMissingError
 			if errors.As(err, &credErr) {
-				return authorizeServer(ctx, opts, config.ClientCredentials{}, DefaultBrokerURL)
+				return authorizeServer(ctx, opts, clientCredentials{}, DefaultBrokerURL)
 			}
 		}
 
@@ -101,7 +121,7 @@ func authURL(clientID string) string {
 	return fmt.Sprintf("%s/%s/authorize", AuthBaseURL, clientID)
 }
 
-func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.ClientCredentials, brokerURL string) (TokenResponse, error) {
+func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds clientCredentials, brokerURL string) (TokenResponse, error) {
 	isBroker := brokerURL != ""
 
 	var state string
@@ -230,7 +250,7 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 	} else {
 		redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", CallbackPort)
 		fullAuthURL = fmt.Sprintf("%s?redirect_uri=%s&state=%s",
-			authURL(creds.ClientID),
+			authURL(creds.clientID),
 			url.QueryEscape(redirectURI),
 			url.QueryEscape(state))
 	}
@@ -277,10 +297,10 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 	}
 }
 
-func exchangeCode(ctx context.Context, creds config.ClientCredentials, code string) (TokenResponse, error) {
+func exchangeCode(ctx context.Context, creds clientCredentials, code string) (TokenResponse, error) {
 	data := url.Values{
-		"client_id":     {creds.ClientID},
-		"client_secret": {creds.ClientSecret},
+		"client_id":     {creds.clientID},
+		"client_secret": {creds.clientSecret},
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 	}

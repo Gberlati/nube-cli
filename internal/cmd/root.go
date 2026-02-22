@@ -11,10 +11,9 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/gberlati/nube-cli/internal/config"
+	"github.com/gberlati/nube-cli/internal/credstore"
 	"github.com/gberlati/nube-cli/internal/errfmt"
 	"github.com/gberlati/nube-cli/internal/outfmt"
-	"github.com/gberlati/nube-cli/internal/secrets"
 	"github.com/gberlati/nube-cli/internal/ui"
 )
 
@@ -25,12 +24,11 @@ const (
 
 type RootFlags struct {
 	Color          string `help:"Color output: auto|always|never" default:"${color}"`
-	Account        string `help:"Account email for API commands" aliases:"acct" short:"a"`
-	Client         string `help:"OAuth client name (selects stored credentials + token bucket)" default:"${client}"`
+	Store          string `help:"Store profile name" short:"s" env:"NUBE_STORE"`
 	EnableCommands string `help:"Comma-separated list of enabled top-level commands (restricts CLI)" default:"${enabled_commands}"`
 	JSON           bool   `help:"Output JSON to stdout (best for scripting)" default:"${json}" short:"j"`
 	Plain          bool   `help:"Output stable, parseable text to stdout (TSV; no colors)" default:"${plain}" short:"p"`
-	Select         string `help:"Comma-separated list of fields to select from JSON output (supports dot paths)" short:"s"`
+	Select         string `help:"Comma-separated list of fields to select from JSON output (supports dot paths)" short:"S"`
 	Force          bool   `help:"Skip confirmations for destructive commands" aliases:"yes,assume-yes" short:"y"`
 	NoInput        bool   `help:"Never prompt; fail instead (useful for CI)" aliases:"non-interactive,noninteractive"`
 	DryRun         bool   `help:"Show what would be done without executing" short:"n"`
@@ -42,9 +40,27 @@ type CLI struct {
 
 	Version kong.VersionFlag `help:"Print version and exit"`
 
-	Auth       AuthCmd    `cmd:"" help:"Auth and credentials"`
-	Config     ConfigCmd  `cmd:"" help:"Manage configuration"`
+	// Desire paths — agent-friendly shortcuts.
+	Shop     StoreGetCmd    `cmd:"" name:"shop" help:"Show store info (alias for 'store get')"`
+	Products ProductListCmd `cmd:"" name:"products" help:"List products (alias for 'product list')"`
+	Orders   OrderListCmd   `cmd:"" name:"orders" help:"List orders (alias for 'order list')"`
+	Status   AuthStatusCmd  `cmd:"" name:"status" help:"Show auth status (alias for 'auth status')"`
+	Login    LoginCmd       `cmd:"" name:"login" help:"Authorize and store a profile"`
+	Logout   LogoutCmd      `cmd:"" name:"logout" help:"Remove a store profile"`
+
+	// Domain commands.
+	Auth     AuthCmd     `cmd:"" help:"Auth and credentials"`
+	Store    StoreCmd    `cmd:"" help:"Store information"`
+	Product  ProductCmd  `cmd:"" aliases:"prod" help:"Manage products"`
+	Order    OrderCmd    `cmd:"" aliases:"ord" help:"Manage orders"`
+	Category CategoryCmd `cmd:"" aliases:"cat" help:"Manage categories"`
+	Customer CustomerCmd `cmd:"" aliases:"cust" help:"Manage customers"`
+	Config   ConfigCmd   `cmd:"" help:"Manage configuration"`
+	Agent    AgentCmd    `cmd:"" help:"Agent-friendly helpers"`
+	Schema   SchemaCmd   `cmd:"" help:"Machine-readable command schema" aliases:"help-json"`
+
 	VersionCmd VersionCmd `cmd:"" name:"version" help:"Print version"`
+	Help       HelpCmd    `cmd:"" help:"Show help (same as --help)"`
 }
 
 type exitPanic struct{ code int }
@@ -63,7 +79,7 @@ func Execute(args []string) (err error) {
 					return
 				}
 
-				err = &ExitError{Code: ep.code, Err: errors.New("exited")}
+				err = &ExitErr{Code: ep.code, Err: errors.New("exited")}
 
 				return
 			}
@@ -125,6 +141,7 @@ func Execute(args []string) (err error) {
 
 	kctx.BindTo(ctx, (*context.Context)(nil))
 	kctx.Bind(&cli.RootFlags)
+	kctx.Bind(parser)
 
 	err = kctx.Run()
 	if err == nil {
@@ -133,6 +150,12 @@ func Execute(args []string) (err error) {
 
 	if ExitCode(err) == 0 {
 		return nil
+	}
+
+	// Wrap with stable exit code if not already wrapped.
+	var ee *ExitErr
+	if !errors.As(err, &ee) {
+		err = &ExitErr{Code: stableExitCode(err), Err: err}
 	}
 
 	if u := ui.FromContext(ctx); u != nil {
@@ -159,7 +182,7 @@ func wrapParseError(err error) error {
 
 	var parseErr *kong.ParseError
 	if errors.As(err, &parseErr) {
-		return &ExitError{Code: 2, Err: parseErr}
+		return &ExitErr{Code: ExitUsage, Err: parseErr}
 	}
 
 	return err
@@ -178,7 +201,7 @@ func boolString(v bool) string {
 }
 
 func usagef(format string, args ...any) error {
-	return &ExitError{Code: 2, Err: fmt.Errorf(format, args...)}
+	return &ExitErr{Code: ExitUsage, Err: fmt.Errorf(format, args...)}
 }
 
 func newUsageError(err error) error {
@@ -186,14 +209,13 @@ func newUsageError(err error) error {
 		return nil
 	}
 
-	return &ExitError{Code: 2, Err: err}
+	return &ExitErr{Code: ExitUsage, Err: err}
 }
 
 func newParser(description string) (*kong.Kong, *CLI, error) {
 	envMode := outfmt.FromEnv()
 	vars := kong.Vars{
 		"color":            envOr("NUBE_COLOR", colorAuto),
-		"client":           envOr("NUBE_CLIENT", ""),
 		"enabled_commands": envOr("NUBE_ENABLE_COMMANDS", ""),
 		"json":             boolString(envMode.JSON),
 		"plain":            boolString(envMode.Plain),
@@ -223,23 +245,14 @@ func baseDescription() string {
 func helpDescription() string {
 	desc := baseDescription()
 
-	configPath, err := config.ConfigPath()
-	configLine := "unknown"
+	credPath, err := credstore.Path()
+	credLine := "unknown"
 
 	if err != nil {
-		configLine = fmt.Sprintf("error: %v", err)
-	} else if configPath != "" {
-		configLine = configPath
+		credLine = fmt.Sprintf("error: %v", err)
+	} else if credPath != "" {
+		credLine = credPath
 	}
 
-	backendInfo, err := secrets.ResolveKeyringBackendInfo()
-	var backendLine string
-
-	if err != nil {
-		backendLine = fmt.Sprintf("error: %v", err)
-	} else if backendInfo.Value != "" {
-		backendLine = fmt.Sprintf("%s (source: %s)", backendInfo.Value, backendInfo.Source)
-	}
-
-	return fmt.Sprintf("%s\n\nConfig:\n  file: %s\n  keyring backend: %s", desc, configLine, backendLine)
+	return fmt.Sprintf("%s\n\nCredentials: %s", desc, credLine)
 }

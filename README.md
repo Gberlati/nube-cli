@@ -1,46 +1,25 @@
-# ☁️ nube-cli - a CLI for managing Tienda Nube stores.
+# nube-cli
 
-![GitHub Repo Banner](https://ghrb.waren.build/banner?header=%E2%98%81%EF%B8%8F+nube-cli&bg=0055D4-001554&color=FFFFFF&headerfont=Google+Sans&watermarkpos=bottom-right)
-<!-- Created with GitHub Repo Banner by Waren Gonzaga: https://ghrb.waren.build -->
-
-Fast, agentic and script-friendly CLI for managing Tienda Nube stores from the terminal. JSON-first output, with support for multiple stores.
+Fast, script-friendly CLI for managing Tienda Nube stores from the terminal.
 
 ## Features
 
-**Implemented:**
-
-- **Configuration** — get/set/list/unset config values; inspect config paths and keyring backend
-- **Version** — print version, commit, and build date
-- **Multiple accounts** — manage multiple Tienda Nube stores simultaneously (with aliases)
+- **Auth** — OAuth via broker (zero-setup) or native browser flow; multi-store profiles
+- **Store** — get store info (name, email, domain, plan)
+- **Products** — list/get with full filtering, pagination, and SKU lookup
+- **Orders** — list/get with status, payment, shipping, and date filters
+- **Categories** — list/get with filtering
+- **Customers** — list/get with search and filtering
+- **Output** — JSON (`--json`), TSV (`--plain`), field selection (`--select id,name.en`)
+- **Agent helpers** — stable exit codes, machine-readable command schema
+- **Shortcuts** — `nube shop`, `nube products`, `nube orders`, `nube status`, `nube login`
 - **Command allowlist** — restrict top-level commands for sandboxed/agent runs
-- **Secure credential storage** — OS keyring or encrypted on-disk keyring (configurable)
-- **Auth** — OAuth authorization via broker (zero-setup) or native browser flow (custom app credentials), credential management, account aliases
-- **Parseable output** — JSON (`--json`) and TSV (`--plain`) modes for scripting and automation
-
-**Planned:**
-
-- **Store** — get store info and general settings
-- **Products** — list/search/get/create/update/delete products and variants; look up by SKU; bulk-update stock and price; manage product images
-- **Categories** — list/get/create/update/delete categories; organize storefront navigation hierarchy
-- **Customers** — list/search/get/create/update/delete customers; inspect contact info and purchase history
-- **Orders** — list/search/get/create/update orders; open/close/cancel; view audit history; manage fulfillment orders and tracking events
-- **Draft Orders** — create/confirm/delete draft orders from outside channels
-- **Abandoned Checkouts** — list/get abandoned checkouts; apply coupons to recover carts
-- **Coupons & Discounts** — list/get/create/update/delete coupons; define cart-level promotion and tier discount rules
-- **Transactions** — list/get/create transactions per order; post events to drive payment state transitions
-- **Shipping** — manage carriers and rate options; manage fulfillment events per order
-- **Locations** — list/get/create/update/delete store locations; set priorities and default; inspect inventory levels
-- **Blog & Pages** — manage blog posts and static store pages; upload images; manage SEO metadata
-- **Metafields** — manage namespaced key-value metafields scoped to any resource
-- **Webhooks** — list/get/create/update/delete event subscriptions
-- **Billing** — manage app plans, subscriptions, and charges
-- **FTP Support** — manage store themes by connecting via FTP
 
 ## Installation
 
 ### Pre-built Binaries
 
-Download the latest release from the [GitHub Releases](https://github.com/gberlati/nube-cli/releases) page. Pre-built binaries are available for linux, macOS, and Windows (amd64/arm64).
+Download from [GitHub Releases](https://github.com/gberlati/nube-cli/releases). Available for Linux, macOS, and Windows (amd64/arm64).
 
 ### Build from Source
 
@@ -48,191 +27,187 @@ Download the latest release from the [GitHub Releases](https://github.com/gberla
 git clone https://github.com/gberlati/nube-cli.git
 cd nube-cli
 make
-```
-
-Run:
-
-```bash
 ./bin/nube --help
 ```
 
 ## Quick Start
 
 ```bash
-# Authorize a store (opens browser — no setup required)
-nube auth add user@example.com
+# Log in (opens browser — no setup required)
+nube login
 
-# Check version
-nube version
+# Check store info
+nube shop --json
 
-# JSON output for scripting
-nube version --json
-nube config list --json
+# List products
+nube products --json --per-page 5
+
+# List open orders
+nube orders --json --status open
+
+# Get a single product
+nube product get 12345 --json
+
+# Look up by SKU
+nube product get-by-sku ABC-001 --json
+
+# Multi-store
+nube login dev-store
+nube products --store dev-store --json
 ```
 
 ## Authentication
 
-nube-cli supports two OAuth flows: a **broker flow** (default, zero setup) and a **native browser flow** (for developers with their own Tienda Nube app credentials).
+Two OAuth flows: **broker** (default, zero setup) and **native** (your own app credentials).
 
-### Default (Broker)
-
-Just run:
+### Broker (default)
 
 ```bash
-nube auth add user@example.com
+nube login
 ```
 
-The browser opens, you authorize, and the token is stored automatically. No credentials file needed.
+Opens the browser, you authorize, and the token is saved to `~/.config/nube-cli/credentials.json`. No credentials file needed.
 
-Override the broker URL if needed:
+Override the broker URL:
 
 ```bash
-nube auth add user@example.com --broker-url https://my-broker.example.com
-# or via environment variable
-NUBE_AUTH_BROKER=https://my-broker.example.com nube auth add user@example.com
+NUBE_AUTH_BROKER=https://my-broker.example.com nube login
 ```
 
-### Custom App (Native)
+### Native (custom app)
 
-For developers with their own Tienda Nube app credentials:
-
-**1. Store OAuth credentials**
+For developers with their own Tienda Nube app:
 
 ```bash
-# From a file
+# Store OAuth client credentials
 nube auth credentials set /path/to/credentials.json
 
-# From stdin
-cat credentials.json | nube auth credentials set -
-
-# List stored credentials
-nube auth credentials list
+# Log in (uses native flow when no broker is configured)
+nube login
 ```
 
-**2. Authorize a store**
-
-When no broker URL is configured and credentials are present, the CLI uses the native browser flow:
+### Store Management
 
 ```bash
-nube auth add user@example.com
+nube auth list              # List store profiles
+nube auth status            # Show credential file + active store
+nube auth token [name]      # Print access token
+nube auth default <name>    # Set default profile
+nube logout <name>          # Remove a profile
 ```
 
-Use `--client` for named credential sets:
+### CI / Non-interactive
 
 ```bash
-nube auth credentials set creds.json --client beta
-nube auth add user@example.com --client beta
+# Option 1: Copy credentials.json to the CI machine
+nube products --store my-shop --json
+
+# Option 2: Environment variables (no credential file needed)
+NUBE_ACCESS_TOKEN=abc123 NUBE_USER_ID=456 nube products --json
 ```
 
-### Account Management
+## Commands
 
-```bash
-# List authorized accounts
-nube auth list
+### Shortcuts
 
-# Check auth status and keyring backend
-nube auth status
+| Command | Equivalent |
+|---------|------------|
+| `nube shop` | `nube store get` |
+| `nube products` | `nube product list` |
+| `nube orders` | `nube order list` |
+| `nube status` | `nube auth status` |
+| `nube login` | OAuth login flow |
+| `nube logout` | Remove profile |
 
-# Remove an account
-nube auth remove user@example.com
+### Auth
 
-# List stored token keys
-nube auth tokens list
-```
-
-### Account Aliases
-
-Aliases let you refer to accounts by short names instead of email addresses:
-
-```bash
-# Set an alias
-nube auth alias set prod user@example.com
-
-# Use an alias with any command
-nube <command> --account prod
-
-# List aliases
-nube auth alias list
-
-# Remove an alias
-nube auth alias unset prod
-```
-
-### Multiple Stores
-
-Use `--client` to manage separate OAuth credential sets and token buckets:
-
-```bash
-# Store credentials for a named client
-nube auth credentials set creds.json --client beta
-
-# Authorize under the named client
-nube auth add user@example.com --client beta
-
-# Use the named client for API calls
-nube <command> --account user@example.com --client beta
-```
-
-## CLI Command Reference
-
-### Implemented
-
-- `nube version` — print version, commit, and build date
-- `nube config keys` — list valid config keys
-- `nube config get <key>` — get a config value
-- `nube config list` — list all config values
-- `nube config path` — show config file path
-- `nube config set <key> <value>` — set a config value
-- `nube config unset <key>` — unset a config value
+- `nube login [name]` — authorize and save a store profile
+- `nube logout <name>` — remove a store profile
+- `nube auth list` — list store profiles
+- `nube auth status` — show credential file path and active store
+- `nube auth token [name]` — print access token
+- `nube auth default <name>` — set default store profile
 - `nube auth credentials set <path>` — store OAuth client credentials
-- `nube auth credentials list` — list stored credentials
-- `nube auth add <email>` — authorize and store access token
-- `nube auth list` — list stored accounts
-- `nube auth alias list` — list account aliases
-- `nube auth alias set <alias> <email>` — create account alias
-- `nube auth alias unset <alias>` — remove account alias
-- `nube auth status` — show auth config and keyring backend
-- `nube auth remove <email>` — remove stored token
-- `nube auth tokens list` — list raw keyring keys
-- `nube auth tokens delete <email>` — delete stored token
+- `nube auth credentials list` — list OAuth client credentials
+
+### Resources
+
+- `nube store get`
+- `nube product list [flags]` / `get <id>` / `get-by-sku <sku>`
+- `nube order list [flags]` / `get <id>`
+- `nube category list [flags]` / `get <id>`
+- `nube customer list [flags]` / `get <id>`
+
+### Config & Agent
+
+- `nube config list` / `path`
+- `nube agent exit-codes`
+- `nube schema`
+
+### Aliases
+
+`prod`, `ord`, `cat`, `cust`, `help-json`
+
+## Global Flags
+
+| Flag | Short | Env | Description |
+|------|-------|-----|-------------|
+| `--store` | `-s` | `NUBE_STORE` | Store profile name |
+| `--json` | `-j` | `NUBE_JSON` | JSON output |
+| `--plain` | `-p` | `NUBE_PLAIN` | TSV output (no colors) |
+| `--select` | `-S` | | Field selection (e.g. `id,name.en`) |
+| `--force` | `-y` | | Skip confirmations |
+| `--no-input` | | | Never prompt; fail instead |
+| `--dry-run` | `-n` | | Show what would be done |
+| `--verbose` | `-v` | | Enable debug logging |
+| `--color` | | `NUBE_COLOR` | `auto` / `always` / `never` |
+| `--enable-commands` | | `NUBE_ENABLE_COMMANDS` | Command allowlist |
 
 ## Environment Variables
 
- - `NUBE_ACCOUNT` — Account email or alias for API commands (used when `--account` is not set)
- - `NUBE_CLIENT` — OAuth client bucket name (used when `--client` is not set)
- - `NUBE_AUTH_BROKER` — OAuth broker URL (overrides the default broker)
- - `NUBE_KEYRING_PASSWORD` — Password used as fallback to encrypt tokens if no OS keyring is available
- - `NUBE_KEYRING_BACKEND` — Force keyring backend: `auto` (default), `keychain`, or `file`
- - `NUBE_JSON` — Default to JSON output (`1`, `true`, `yes`)
- - `NUBE_PLAIN` — Default to plain/TSV output (`1`, `true`, `yes`)
- - `NUBE_COLOR` — Color mode: `auto` (default), `always`, or `never`
- - `NUBE_ENABLE_COMMANDS` — Comma-separated allowlist of top-level commands (e.g., `config,version`)
+| Variable | Description |
+|----------|-------------|
+| `NUBE_ACCESS_TOKEN` | Access token (bypasses credential file; for CI) |
+| `NUBE_USER_ID` | Store/user ID (used with `NUBE_ACCESS_TOKEN`) |
+| `NUBE_STORE` | Store profile name |
+| `NUBE_AUTH_BROKER` | Custom OAuth broker URL |
+| `NUBE_JSON` | Default to JSON output |
+| `NUBE_PLAIN` | Default to TSV output |
+| `NUBE_COLOR` | Color mode: `auto` / `always` / `never` |
+| `NUBE_ENABLE_COMMANDS` | Comma-separated command allowlist |
+
+## Exit Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | ok | Success |
+| 1 | error | Generic error |
+| 2 | usage | Invalid usage |
+| 3 | auth_required | HTTP 401 |
+| 4 | not_found | HTTP 404 |
+| 5 | permission_denied | HTTP 403 |
+| 6 | rate_limited | HTTP 429 |
+| 7 | retryable | HTTP 5xx |
+| 8 | config | Missing config or credentials |
+| 9 | cancelled | User cancelled |
+| 10 | payment_required | HTTP 402 |
+| 11 | validation | HTTP 422 |
 
 ## Security
 
-Access tokens are stored in the OS keyring (macOS Keychain, Linux SecretService/D-Bus) via `github.com/99designs/keyring`. When no OS keyring is available, tokens fall back to an encrypted file backend in `$XDG_CONFIG_HOME/nube-cli/keyring/` (protected with `NUBE_KEYRING_PASSWORD`).
+Credentials are stored in `~/.config/nube-cli/credentials.json` with `0600` permissions. Config directories use `0700`.
 
-All config and credential files are written with `0600` permissions. Config directories use `0700`.
-
-TLS 1.2+ is enforced for all API connections. A circuit breaker prevents cascading failures when the API is unresponsive. API errors are typed and user-friendly messages are shown for common issues (auth failures, payment required, permission denied, validation errors).
+TLS 1.2+ is enforced for all API connections. A circuit breaker prevents cascading failures. Rate limiting is handled automatically with exponential backoff.
 
 ## Development
 
-### Build from source
-
 ```bash
-make          # build binary to ./bin/nube
-make tools    # install pinned dev tools
-make fmt      # format code
-make lint     # lint code
+make          # build to ./bin/nube
 make test     # run tests
-make fmt-check # check formatting (CI)
-```
-
-### Pre-commit hooks
-
-```bash
-lefthook install  # runs fmt-check, lint, test before each commit
+make lint     # lint
+make fmt      # format
+make ci       # all of the above
+lefthook install  # pre-commit hooks
 ```
 
 ## License
@@ -241,10 +216,5 @@ MIT
 
 ## Links
 
- - [Github Repository](https://github.com/gberlati/nube-cli)
- - [Tienda Nube Documentation](https://tiendanube.github.io/api-documentation)
-
-## Credits
-
-This project is inspired by Peter Steinberg's google CLI.
- - [gogcli](https://github.com/steipete/gogcli)
+- [GitHub Repository](https://github.com/gberlati/nube-cli)
+- [Tienda Nube API Documentation](https://tiendanube.github.io/api-documentation)

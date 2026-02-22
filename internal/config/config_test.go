@@ -13,8 +13,8 @@ func TestReadConfig_NoFile(t *testing.T) {
 		t.Fatalf("ReadConfig() error = %v", err)
 	}
 
-	if cfg.KeyringBackend != "" {
-		t.Errorf("KeyringBackend = %q, want empty", cfg.KeyringBackend)
+	if len(cfg.ClientDomains) != 0 {
+		t.Errorf("ClientDomains should be empty, got %v", cfg.ClientDomains)
 	}
 }
 
@@ -22,8 +22,7 @@ func TestWriteReadRoundtrip(t *testing.T) {
 	setupConfigDir(t)
 
 	want := File{
-		KeyringBackend: "file",
-		AccountAliases: map[string]string{"prod": "prod@example.com"},
+		ClientDomains: map[string]string{"myapp": "myapp.example.com"},
 	}
 
 	if writeErr := WriteConfig(want); writeErr != nil {
@@ -35,12 +34,8 @@ func TestWriteReadRoundtrip(t *testing.T) {
 		t.Fatalf("ReadConfig() error = %v", err)
 	}
 
-	if got.KeyringBackend != want.KeyringBackend {
-		t.Errorf("KeyringBackend = %q, want %q", got.KeyringBackend, want.KeyringBackend)
-	}
-
-	if got.AccountAliases["prod"] != "prod@example.com" {
-		t.Errorf("AccountAliases[prod] = %q, want %q", got.AccountAliases["prod"], "prod@example.com")
+	if got.ClientDomains["myapp"] != "myapp.example.com" {
+		t.Errorf("ClientDomains[myapp] = %q, want %q", got.ClientDomains["myapp"], "myapp.example.com")
 	}
 }
 
@@ -74,7 +69,6 @@ func TestConfigExists(t *testing.T) {
 func TestJSON5Parsing(t *testing.T) {
 	setupConfigDir(t)
 
-	// Ensure dir exists before writing directly
 	if _, ensureErr := EnsureDir(); ensureErr != nil {
 		t.Fatalf("EnsureDir() error = %v", ensureErr)
 	}
@@ -87,9 +81,8 @@ func TestJSON5Parsing(t *testing.T) {
 	// JSON5 with comments and trailing comma
 	content := `{
   // This is a comment
-  "keyring_backend": "file",
-  "account_aliases": {
-    "prod": "prod@example.com",
+  "client_domains": {
+    "myapp": "myapp.example.com",
   },
 }`
 
@@ -103,11 +96,7 @@ func TestJSON5Parsing(t *testing.T) {
 		t.Fatalf("ReadConfig() error = %v", err)
 	}
 
-	if cfg.KeyringBackend != "file" {
-		t.Errorf("KeyringBackend = %q, want %q", cfg.KeyringBackend, "file")
-	}
-
-	if cfg.AccountAliases["prod"] != "prod@example.com" {
-		t.Errorf("AccountAliases[prod] = %q", cfg.AccountAliases["prod"])
+	if cfg.ClientDomains["myapp"] != "myapp.example.com" {
+		t.Errorf("ClientDomains[myapp] = %q", cfg.ClientDomains["myapp"])
 	}
 }

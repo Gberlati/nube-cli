@@ -11,34 +11,34 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gberlati/nube-cli/internal/config"
+	"github.com/gberlati/nube-cli/internal/credstore"
 )
 
-var testCreds = config.ClientCredentials{
-	ClientID:     "test-client-id",
-	ClientSecret: "test-client-secret",
+var testCreds = clientCredentials{
+	clientID:     "test-client-id",
+	clientSecret: "test-client-secret",
 }
 
-func mockReadCredentials(t *testing.T) {
+func mockReadOAuthClientOK(t *testing.T) {
 	t.Helper()
 
-	orig := readClientCredentials
-	readClientCredentials = func(_ string) (config.ClientCredentials, error) {
+	orig := readOAuthClient
+	readOAuthClient = func(_ string) (clientCredentials, error) {
 		return testCreds, nil
 	}
 
-	t.Cleanup(func() { readClientCredentials = orig })
+	t.Cleanup(func() { readOAuthClient = orig })
 }
 
-func mockReadCredentialsFail(t *testing.T) {
+func mockReadOAuthClientFail(t *testing.T) {
 	t.Helper()
 
-	orig := readClientCredentials
-	readClientCredentials = func(_ string) (config.ClientCredentials, error) {
-		return config.ClientCredentials{}, &config.CredentialsMissingError{Path: "/test"}
+	orig := readOAuthClient
+	readOAuthClient = func(_ string) (clientCredentials, error) {
+		return clientCredentials{}, &credstore.OAuthClientMissingError{Name: "default"}
 	}
 
-	t.Cleanup(func() { readClientCredentials = orig })
+	t.Cleanup(func() { readOAuthClient = orig })
 }
 
 func mockBrowser(t *testing.T, fn func(string) error) {
@@ -160,7 +160,7 @@ func doCallbackRequest(t *testing.T, callbackURL string) {
 
 func TestAuthorizeServer(t *testing.T) {
 	// Cannot run in parallel — uses fixed port 8910
-	mockReadCredentials(t)
+	mockReadOAuthClientOK(t)
 
 	var capturedURL string
 
@@ -200,7 +200,7 @@ func TestAuthorizeServer(t *testing.T) {
 }
 
 func TestAuthorizeServer_StateMismatch(t *testing.T) {
-	mockReadCredentials(t)
+	mockReadOAuthClientOK(t)
 
 	mockBrowser(t, func(_ string) error {
 		go func() {
@@ -224,7 +224,7 @@ func TestAuthorizeServer_StateMismatch(t *testing.T) {
 }
 
 func TestAuthorizeServer_MissingCode(t *testing.T) {
-	mockReadCredentials(t)
+	mockReadOAuthClientOK(t)
 
 	mockBrowser(t, func(capturedURL string) error {
 		go func() {
@@ -251,7 +251,7 @@ func TestAuthorizeServer_MissingCode(t *testing.T) {
 }
 
 func TestAuthorizeServer_Timeout(t *testing.T) {
-	mockReadCredentials(t)
+	mockReadOAuthClientOK(t)
 
 	mockBrowser(t, func(_ string) error {
 		// Don't simulate any callback — let it timeout
@@ -280,7 +280,7 @@ func TestAuthorizeServer_BrokerFlow(t *testing.T) {
 		return nil
 	})
 
-	tok, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 5 * time.Second}, config.ClientCredentials{}, "http://broker.example.com")
+	tok, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 5 * time.Second}, clientCredentials{}, "http://broker.example.com")
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -295,8 +295,8 @@ func TestAuthorizeServer_BrokerFlow(t *testing.T) {
 }
 
 func TestAuthorize_BrokerSkipsCredentials(t *testing.T) {
-	// Make readClientCredentials fail — broker should not need them.
-	mockReadCredentialsFail(t)
+	// Make readOAuthClient fail — broker should not need them.
+	mockReadOAuthClientFail(t)
 
 	mockBrowser(t, func(_ string) error {
 		go func() {
@@ -323,7 +323,7 @@ func TestAuthorize_BrokerSkipsCredentials(t *testing.T) {
 }
 
 func TestAuthorize_FallsBackToNativeWithCredentials(t *testing.T) {
-	mockReadCredentials(t)
+	mockReadOAuthClientOK(t)
 
 	var capturedURL string
 
@@ -365,7 +365,7 @@ func TestAuthorize_FallsBackToNativeWithCredentials(t *testing.T) {
 
 func TestAuthorize_CredentialsError_FallsBackToBroker(t *testing.T) {
 	// No broker URL + credentials fail → falls back to default broker.
-	mockReadCredentialsFail(t)
+	mockReadOAuthClientFail(t)
 
 	mockBrowser(t, func(_ string) error {
 		go func() {
