@@ -27,7 +27,7 @@ const (
 	CallbackPort = 8910
 	// DefaultBrokerURL is the default OAuth broker URL.
 	// Set to the deployed Cloudflare Worker URL. See broker/ for the worker source.
-	DefaultBrokerURL = ""
+	DefaultBrokerURL = "nube-cli-auth-broker.gonzaloberlati.workers.dev"
 )
 
 // AuthorizeOptions configures the OAuth flow.
