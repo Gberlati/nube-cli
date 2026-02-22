@@ -30,10 +30,11 @@ const (
 // RetryTransport wraps an http.RoundTripper with retry logic for
 // rate limits (429) and server errors (5xx).
 type RetryTransport struct {
-	Base          http.RoundTripper
-	MaxRetries429 int
-	MaxRetries5xx int
-	BaseDelay     time.Duration
+	Base           http.RoundTripper
+	CircuitBreaker *CircuitBreaker
+	MaxRetries429  int
+	MaxRetries5xx  int
+	BaseDelay      time.Duration
 }
 
 // NewRetryTransport creates a RetryTransport with sensible defaults.
@@ -43,15 +44,20 @@ func NewRetryTransport(base http.RoundTripper) *RetryTransport {
 	}
 
 	return &RetryTransport{
-		Base:          base,
-		MaxRetries429: MaxRateLimitRetries,
-		MaxRetries5xx: Max5xxRetries,
-		BaseDelay:     RateLimitBaseDelay,
+		Base:           base,
+		CircuitBreaker: NewCircuitBreaker(),
+		MaxRetries429:  MaxRateLimitRetries,
+		MaxRetries5xx:  Max5xxRetries,
+		BaseDelay:      RateLimitBaseDelay,
 	}
 }
 
 // RoundTrip implements http.RoundTripper with retry logic.
 func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.CircuitBreaker != nil && t.CircuitBreaker.IsOpen() {
+		return nil, &CircuitBreakerError{Failures: CircuitBreakerThreshold}
+	}
+
 	if err := ensureReplayableBody(req); err != nil {
 		return nil, err
 	}
@@ -80,17 +86,23 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 		resp, err = t.Base.RoundTrip(req)
 		if err != nil {
+			t.recordFailure()
+
 			return nil, fmt.Errorf("round trip: %w", err)
 		}
 
 		// Success or non-retryable client error.
 		if resp.StatusCode < 400 {
+			t.recordSuccess()
+
 			return resp, nil
 		}
 
 		// Rate limit (429).
 		if resp.StatusCode == http.StatusTooManyRequests {
 			if retries429 >= t.MaxRetries429 {
+				t.recordFailure()
+
 				return resp, nil
 			}
 
@@ -115,6 +127,8 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// Server error (5xx).
 		if resp.StatusCode >= 500 {
 			if retries5xx >= t.MaxRetries5xx {
+				t.recordFailure()
+
 				return resp, nil
 			}
 
@@ -139,10 +153,10 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (t *RetryTransport) calculateBackoff(attempt int, resp *http.Response) time.Duration {
-	// Check Tienda Nube rate-limit reset header (seconds until reset).
+	// Check Tienda Nube rate-limit reset header (milliseconds until reset).
 	if resetStr := resp.Header.Get(headerRateLimitReset); resetStr != "" {
-		if seconds, parseErr := strconv.Atoi(resetStr); parseErr == nil && seconds > 0 {
-			return time.Duration(seconds) * time.Second
+		if ms, parseErr := strconv.Atoi(resetStr); parseErr == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
 		}
 	}
 
@@ -186,6 +200,18 @@ func (t *RetryTransport) sleep(ctx context.Context, d time.Duration) error {
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("sleep interrupted: %w", ctx.Err())
+	}
+}
+
+func (t *RetryTransport) recordSuccess() {
+	if t.CircuitBreaker != nil {
+		t.CircuitBreaker.RecordSuccess()
+	}
+}
+
+func (t *RetryTransport) recordFailure() {
+	if t.CircuitBreaker != nil {
+		t.CircuitBreaker.RecordFailure()
 	}
 }
 

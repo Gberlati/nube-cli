@@ -20,6 +20,7 @@ Build a single, clean, modern Go CLI that talks to Tienda Nube's complete API an
   - `--color=auto|always|never` (default `auto`)
   - `--json` (JSON output to stdout)
   - `--plain` (TSV output to stdout; stable/parseable; disables colors)
+  - `--select` (comma-separated fields for JSON projection; supports dot paths, e.g. `--select id,name.en`)
   - `--force` (skip confirmations for destructive commands)
   - `--no-input` (never prompt; fail instead)
   - `--version` (print version)
@@ -336,6 +337,7 @@ Default: human-friendly tables (stdlib `text/tabwriter`).
 - Parseable stdout:
   - `--json`: JSON objects/arrays suitable for scripting
   - `--plain`: stable TSV (tabs preserved; no alignment; no colors)
+  - `--select`: JSON field projection with dot-notation (e.g. `--select id,name.en,variants`). When applied to arrays, projects each element. Requires `--json`.
 - Human-facing hints/progress are written to stderr so stdout can be safely captured.
 - Colors are only used for human-facing output and are disabled automatically for `--json` and `--plain`.
 
@@ -350,8 +352,49 @@ We avoid heavy table deps unless we decide we need them.
 - `internal/errfmt/*` — user-friendly error formatting
 - `internal/config/*` — config paths + credential parsing/writing + aliases
 - `internal/secrets/*` — keyring store
-- `internal/api/*` — Tienda Nube API client (HTTP client, retry transport, error types, pagination)
+- `internal/api/*` — Tienda Nube API client (HTTP client, retry transport, circuit breaker, TLS enforcement, typed errors: `APIError`, `AuthError`, `NotFoundError`, `RateLimitError`, `ValidationError`, `PaymentRequiredError`, `PermissionDeniedError`, `CircuitBreakerError`, pagination)
 - `internal/oauth/*` — OAuth 2.0 flow (browser, manual, remote 2-step)
+
+## API error handling
+
+The Tienda Nube API returns three different error response formats:
+
+1. **Business errors** (`{"code": "...", "message": "...", "description": "..."}`): Used for structured API errors (e.g. 422 business logic failures, 5xx errors with messages).
+2. **Parse errors** (`{"error": "..."}`): Used for 400 errors when request body is malformed JSON.
+3. **Field validation** (`{"field_name": ["error1", "error2"]}`): Used for 422 validation errors with per-field error messages.
+
+Status code mapping:
+- **401**: `AuthError` — authentication failed
+- **402**: `PaymentRequiredError` — store subscription suspended
+- **403**: `PermissionDeniedError` — insufficient permissions/scope
+- **404**: `NotFoundError` — resource not found
+- **422**: `ValidationError` (field format) or `APIError` (business format)
+- **429**: Retried by `RetryTransport`; `RateLimitError` after exhausting retries
+- **5xx**: Retried by `RetryTransport`; `APIError` after exhausting retries
+
+## Rate limiting
+
+The Tienda Nube API uses a leaky bucket rate limiter:
+- Bucket size: 40 requests
+- Leak rate: 2 requests/second
+- `X-Rate-Limit-Limit`: bucket size
+- `X-Rate-Limit-Remaining`: remaining requests
+- `X-Rate-Limit-Reset`: **milliseconds** until bucket refills
+
+The `RetryTransport` automatically retries 429 responses with exponential backoff, using `X-Rate-Limit-Reset` (ms) when available. Maximum 5 retries for rate limits, 2 retries for 5xx errors.
+
+## Circuit breaker
+
+The API client includes a circuit breaker that prevents cascading failures:
+- Opens after 5 consecutive failures (5xx responses, transport errors, or exhausted retries)
+- While open, all requests fail immediately with `CircuitBreakerError`
+- Automatically resets after 30 seconds, allowing a probe request
+- Closes on the first successful response
+
+## HTTP client defaults
+
+- TLS 1.2+ enforced for all API connections
+- Default timeout: 30 seconds (configurable via `WithTimeout` option)
 
 ## Formatting, linting, tests
 
@@ -372,6 +415,12 @@ Commands:
 
 - `golangci-lint` with config in `.golangci.yml`
 - `make lint`
+- Notable linters: `bodyclose` (HTTP response body leak detection), `rowserrcheck`, `sqlclosecheck`
+
+### Pre-commit hooks
+
+- `.lefthook.yml` — runs `make fmt-check`, `make lint`, `make test` in parallel before each commit
+- Install: `lefthook install`
 
 ### Tests
 
@@ -399,4 +448,14 @@ Workflow: `.github/workflows/ci.yml`
   - `make fmt-check`
   - `go test ./...`
   - `golangci-lint` (pinned `v2.10.1`)
+
+## Releases
+
+Workflow: `.github/workflows/release.yml`
+
+- triggered on tag push (`v*`)
+- uses `goreleaser-action` with `.goreleaser.yaml`
+- builds multi-platform binaries: linux/darwin/windows (amd64/arm64)
+- darwin builds use `CGO_ENABLED=1` (for Keychain support)
+- creates GitHub release with archives and checksums
 

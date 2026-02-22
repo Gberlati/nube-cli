@@ -121,117 +121,20 @@ All passing:
 
 ## Next steps
 
-### Priority 1: Complete test suite
+Test suite completed — see `docs/memory/milestone-2-tests.md`.
 
-The codebase currently has **zero test files**. This is the most critical gap. Every package needs tests before building more features.
+### Priority 1: First resource commands
 
-#### `internal/api/errors_test.go`
-- Error message formatting for each error type
-- `Is*Error()` checker functions (positive + negative)
-- Error wrapping/unwrapping with `errors.As`
+1. `nube store get` — simplest API call, validates the full auth -> API pipeline
+2. `nube product list` / `nube product get <id>` — first CRUD resource with pagination
+3. `nube order list` / `nube order get <id>` — high-value resource
 
-#### `internal/api/transport_test.go`
-- 429 retry with rate limit headers (X-Rate-Limit-Reset, Retry-After)
-- 429 exhaust retries (MaxRateLimitRetries reached)
-- 5xx retry and exhaust
-- 2xx/4xx no-retry behavior
-- `calculateBackoff()` with reset header, Retry-After, and exponential fallback
-- `ensureReplayableBody()` for body replay
-- Context cancellation during retry sleep
-- Nil body requests
-
-#### `internal/api/client_test.go`
-- `httptest.Server` for all HTTP methods (Get, Post, Put, Delete)
-- `Authentication` header format (NOT `Authorization`)
-- User-Agent header sent
-- URL construction with storeID
-- `DecodeResponse[T]` generic decoding
-- Error response parsing (401 → AuthError, 404 → NotFoundError, other → APIError)
-- Options: WithBaseURL, WithUserAgent, WithHTTPClient
-
-#### `internal/api/pagination_test.go`
-- `ParseLinkHeader()` with next, prev, first, last
-- Multiple rels in single header
-- Empty/malformed headers
-- `CollectAllPages()` with `httptest.Server` serving multiple pages
-- Single page (no Link header)
-
-#### `internal/oauth/oauth_test.go`
-- `exchangeCode()` with mock HTTP server
-- `extractCodeFromURL()` with full URL, bare code, empty
-- `authorizeManual()` — step 1 prints URL, step 2 exchanges code, interactive paste
-- `authorizeServer()` — full flow with test HTTP callback
-- State mismatch error
-- Missing code error
-- Timeout behavior
-- Use testable seams (`readClientCredentials`, `openBrowserFn`)
-
-#### `internal/cmd/auth_test.go`
-- Auth commands via kong parser: credentials set, list, add, list, status, remove, tokens
-- Use testable seams (`authorizeOAuth`, `openSecretsStore`)
-- JSON + plain + default output modes
-- Confirmation prompts (force, no-input)
-- Error cases: empty email, invalid step, missing credentials
-
-#### `internal/cmd/auth_alias_test.go`
-- Alias set/unset/list via kong parser
-- Validation: `@` in alias, reserved names
-- JSON output
-
-#### `internal/cmd/output_helpers_test.go`
-- `writeResult()` in JSON/TSV/UI modes
-- `tableWriter()` with plain vs default
-- `kv()` constructor
-
-#### `internal/cmd/confirm_test.go`
-- `confirmDestructive()` with --force (skip), --no-input (fail), TTY prompt
-
-#### `internal/cmd/account_helpers_test.go`
-- `requireAccount()` resolution chain: flag → env → default → single token
-- `resolveAccountAlias()` with alias config
-- `shouldAutoSelectAccount()` for "auto"/"default"
-
-#### `internal/config/aliases_test.go`
-- Normalize, resolve, set, delete, list aliases
-- Roundtrip through config file
-
-#### `internal/config/list_credentials_test.go`
-- Scan dir with default + named credential files
-- Empty dir, missing dir
-
-#### `internal/errfmt/errfmt_test.go`
-- Format each API error type (APIError, AuthError, RateLimitError, NotFoundError)
-- Existing error types (ParseError, CredentialsMissingError, KeyNotFound)
-- UserFacingError wrapping
-
-#### Existing packages (from milestone 1, still untested)
-
-- `internal/outfmt/outfmt_test.go` — Mode validation, FromFlags, FromEnv, context roundtrip, WriteJSON
-- `internal/config/config_test.go` — ReadConfig, WriteConfig, JSON5 parsing
-- `internal/config/credentials_test.go` — Read/write credentials, validation
-- `internal/config/keys_test.go` — ParseKey, GetValue, SetValue, UnsetValue
-- `internal/config/paths_test.go` — Dir, ConfigPath, CredentialsPath
-- `internal/ui/ui_test.go` — New with color modes, Printer output, context roundtrip
-- `internal/cmd/root_test.go` — Execute with valid/invalid args, flag parsing, exit codes
-- `internal/cmd/version_test.go` — VersionString, VersionCmd JSON/text output
-- `internal/cmd/config_cmd_test.go` — Config subcommands (path, keys, list, get, set, unset)
-- `internal/cmd/enabled_commands_test.go` — Allowlist enforcement
-- `internal/cmd/exit_test.go` — ExitError, ExitCode
-
-#### Integration tests (separate suite)
+### Priority 2: Integration tests
 
 - `internal/integration/` — guarded by `//go:build integration`
 - Requires stored credentials + token in keyring
 - Tests: `auth status`, `auth list`, `store get` (once implemented)
 - Run: `NUBE_IT_ACCOUNT=you@email.com go test -tags=integration ./internal/integration`
-
-### Priority 2: First resource commands
-
-Once the test suite is solid, implement the first API resource commands:
-
-1. `nube store get` — simplest API call, validates the full auth → API pipeline
-2. `nube product list` / `nube product get <id>` — first CRUD resource with pagination
-3. `nube order list` / `nube order get <id>` — high-value resource
 
 ### Priority 3: Polish
 

@@ -73,10 +73,13 @@ func CollectAllPages[T any](
 	currentQuery := query
 
 	for {
-		resp, err := client.Get(ctx, currentPath, currentQuery)
+		resp, err := client.Get(ctx, currentPath, currentQuery) //nolint:bodyclose // decode callback closes body
 		if err != nil {
 			return nil, fmt.Errorf("fetch page: %w", err)
 		}
+
+		// Read Link header before decode closes the body.
+		linkHeader := resp.Header.Get("Link")
 
 		items, decodeErr := decode(resp)
 		if decodeErr != nil {
@@ -85,7 +88,6 @@ func CollectAllPages[T any](
 
 		all = append(all, items...)
 
-		linkHeader := resp.Header.Get("Link")
 		if linkHeader == "" {
 			break
 		}

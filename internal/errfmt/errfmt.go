@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/99designs/keyring"
@@ -51,6 +52,30 @@ func Format(err error) string {
 		return notFoundErr.Error()
 	}
 
+	var validationErr *api.ValidationError
+	if errors.As(err, &validationErr) {
+		return formatValidationError(validationErr)
+	}
+
+	var paymentErr *api.PaymentRequiredError
+	if errors.As(err, &paymentErr) {
+		return "Store access suspended (payment required). Check your Tienda Nube subscription."
+	}
+
+	var permDeniedErr *api.PermissionDeniedError
+	if errors.As(err, &permDeniedErr) {
+		if permDeniedErr.Message != "" {
+			return fmt.Sprintf("Permission denied: %s", permDeniedErr.Message)
+		}
+
+		return "Permission denied"
+	}
+
+	var cbErr *api.CircuitBreakerError
+	if errors.As(err, &cbErr) {
+		return "API temporarily unavailable (circuit breaker open). Try again shortly."
+	}
+
 	if errors.Is(err, keyring.ErrKeyNotFound) {
 		return "Token not found in keyring. Run: nube auth add <email>"
 	}
@@ -91,6 +116,24 @@ func (e *UserFacingError) Unwrap() error {
 
 func NewUserFacingError(message string, cause error) error {
 	return &UserFacingError{Message: message, Cause: cause}
+}
+
+func formatValidationError(err *api.ValidationError) string {
+	// Sort field names for deterministic output.
+	fields := make([]string, 0, len(err.Fields))
+	for f := range err.Fields {
+		fields = append(fields, f)
+	}
+
+	sort.Strings(fields)
+
+	parts := make([]string, 0, len(fields))
+
+	for _, f := range fields {
+		parts = append(parts, fmt.Sprintf("%s: %s", f, strings.Join(err.Fields[f], ", ")))
+	}
+
+	return fmt.Sprintf("Validation error: %s", strings.Join(parts, "; "))
 }
 
 func formatParseError(err *kong.ParseError) string {

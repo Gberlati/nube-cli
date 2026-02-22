@@ -14,11 +14,11 @@ Fast, agentic and script-friendly CLI for managing Tienda Nube stores from the t
 - **Multiple accounts** — manage multiple Tienda Nube stores simultaneously (with aliases)
 - **Command allowlist** — restrict top-level commands for sandboxed/agent runs
 - **Secure credential storage** — OS keyring or encrypted on-disk keyring (configurable)
+- **Auth** — OAuth authorization flow (browser, manual, remote), credential management, account aliases
 - **Parseable output** — JSON (`--json`) and TSV (`--plain`) modes for scripting and automation
 
 **Planned:**
 
-- **Auth** — OAuth authorization flow, credential management, account aliases
 - **Store** — get store info and general settings
 - **Products** — list/search/get/create/update/delete products and variants; look up by SKU; bulk-update stock and price; manage product images
 - **Categories** — list/get/create/update/delete categories; organize storefront navigation hierarchy
@@ -37,6 +37,10 @@ Fast, agentic and script-friendly CLI for managing Tienda Nube stores from the t
 - **FTP Support** — manage store themes by connecting via FTP
 
 ## Installation
+
+### Pre-built Binaries
+
+Download the latest release from the [GitHub Releases](https://github.com/gberlati/nube-cli/releases) page. Pre-built binaries are available for linux, macOS, and Windows (amd64/arm64).
 
 ### Build from Source
 
@@ -70,6 +74,99 @@ nube config set keyring_backend file
 # JSON output for scripting
 nube version --json
 nube config list --json
+
+# Extract specific fields from JSON output
+nube product list --json --select id,name.en,variants
+```
+
+## Authentication
+
+nube-cli uses OAuth to authenticate with the Tienda Nube API. You need OAuth client credentials (a `credentials.json` file containing `client_id` and `client_secret`) to get started.
+
+### 1. Store OAuth credentials
+
+```bash
+# From a file
+nube auth credentials set /path/to/credentials.json
+
+# From stdin
+cat credentials.json | nube auth credentials set -
+
+# List stored credentials
+nube auth credentials list
+```
+
+### 2. Authorize a store
+
+**Browser flow** (default) — opens the browser for authorization:
+
+```bash
+nube auth add user@example.com
+```
+
+**Manual flow** — paste the authorization code in the terminal:
+
+```bash
+nube auth add user@example.com --manual
+```
+
+**Remote flow** — two-step process for headless servers:
+
+```bash
+# Step 1: print the authorization URL (copy to a browser)
+nube auth add user@example.com --remote --step 1
+
+# Step 2: exchange the redirect URL for a token
+nube auth add user@example.com --remote --step 2 --auth-url "http://localhost:8910/callback?code=..."
+```
+
+### 3. Manage accounts
+
+```bash
+# List authorized accounts
+nube auth list
+
+# Check auth status and keyring backend
+nube auth status
+
+# Remove an account
+nube auth remove user@example.com
+
+# List stored token keys
+nube auth tokens list
+```
+
+### 4. Account aliases
+
+Aliases let you refer to accounts by short names instead of email addresses:
+
+```bash
+# Set an alias
+nube auth alias set prod user@example.com
+
+# Use an alias with any command
+nube <command> --account prod
+
+# List aliases
+nube auth alias list
+
+# Remove an alias
+nube auth alias unset prod
+```
+
+### 5. Multiple stores
+
+Use `--client` to manage separate OAuth credential sets and token buckets:
+
+```bash
+# Store credentials for a named client
+nube auth credentials set creds.json --client beta
+
+# Authorize under the named client
+nube auth add user@example.com --client beta
+
+# Use the named client for API calls
+nube <command> --account user@example.com --client beta
 ```
 
 ## Environment Variables
@@ -88,6 +185,8 @@ nube config list --json
 Access tokens are stored in the OS keyring (macOS Keychain, Linux SecretService/D-Bus) via `github.com/99designs/keyring`. When no OS keyring is available, tokens fall back to an encrypted file backend in `$XDG_CONFIG_HOME/nube-cli/keyring/` (protected with `NUBE_KEYRING_PASSWORD`).
 
 All config and credential files are written with `0600` permissions. Config directories use `0700`.
+
+TLS 1.2+ is enforced for all API connections. A circuit breaker prevents cascading failures when the API is unresponsive. API errors are typed and user-friendly messages are shown for common issues (auth failures, payment required, permission denied, validation errors).
 
 ## License
 

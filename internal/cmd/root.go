@@ -30,6 +30,7 @@ type RootFlags struct {
 	EnableCommands string `help:"Comma-separated list of enabled top-level commands (restricts CLI)" default:"${enabled_commands}"`
 	JSON           bool   `help:"Output JSON to stdout (best for scripting)" default:"${json}" short:"j"`
 	Plain          bool   `help:"Output stable, parseable text to stdout (TSV; no colors)" default:"${plain}" short:"p"`
+	Select         string `help:"Comma-separated list of fields to select from JSON output (supports dot paths)" short:"s"`
 	Force          bool   `help:"Skip confirmations for destructive commands" aliases:"yes,assume-yes" short:"y"`
 	NoInput        bool   `help:"Never prompt; fail instead (useful for CI)" aliases:"non-interactive,noninteractive"`
 	DryRun         bool   `help:"Show what would be done without executing" short:"n"`
@@ -100,6 +101,11 @@ func Execute(args []string) (err error) {
 
 	ctx := context.Background()
 	ctx = outfmt.WithMode(ctx, mode)
+
+	if cli.Select != "" {
+		fields := strings.Split(cli.Select, ",")
+		ctx = outfmt.WithJSONTransform(ctx, outfmt.JSONTransform{Select: fields})
+	}
 
 	uiColor := cli.Color
 	if outfmt.IsJSON(ctx) || outfmt.IsPlain(ctx) {

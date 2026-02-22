@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const (
@@ -15,6 +17,8 @@ const (
 	DefaultBaseURL = "https://api.tiendanube.com/v1"
 	// DefaultUserAgent is required by the Tienda Nube API (returns 400 if missing).
 	DefaultUserAgent = "nube-cli (https://github.com/gberlati/nube-cli)"
+	// defaultHTTPTimeout is the default timeout for HTTP requests.
+	defaultHTTPTimeout = 30 * time.Second
 )
 
 // Client is the main HTTP client for the Tienda Nube API.
@@ -24,6 +28,7 @@ type Client struct {
 	storeID     string
 	accessToken string
 	userAgent   string
+	timeout     time.Duration
 }
 
 // Option configures a Client.
@@ -44,6 +49,11 @@ func WithHTTPClient(hc *http.Client) Option {
 	return func(c *Client) { c.httpClient = hc }
 }
 
+// WithTimeout overrides the default HTTP request timeout.
+func WithTimeout(d time.Duration) Option {
+	return func(c *Client) { c.timeout = d }
+}
+
 // New creates a new API client for the given store.
 // The storeID is the Tienda Nube user_id (store ID).
 func New(storeID, accessToken string, opts ...Option) *Client {
@@ -52,6 +62,7 @@ func New(storeID, accessToken string, opts ...Option) *Client {
 		storeID:     storeID,
 		accessToken: accessToken,
 		userAgent:   DefaultUserAgent,
+		timeout:     defaultHTTPTimeout,
 	}
 
 	for _, opt := range opts {
@@ -60,11 +71,38 @@ func New(storeID, accessToken string, opts ...Option) *Client {
 
 	if c.httpClient == nil {
 		c.httpClient = &http.Client{
-			Transport: NewRetryTransport(http.DefaultTransport),
+			Transport: NewRetryTransport(newBaseTransport()),
+			Timeout:   c.timeout,
 		}
 	}
 
 	return c
+}
+
+// newBaseTransport creates an http.Transport with TLS 1.2+ enforcement.
+func newBaseTransport() *http.Transport {
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok || defaultTransport == nil {
+		return &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			TLSClientConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			},
+		}
+	}
+
+	transport := defaultTransport.Clone()
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+
+		return transport
+	}
+
+	if transport.TLSClientConfig.MinVersion < tls.VersionTLS12 {
+		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+	}
+
+	return transport
 }
 
 func (c *Client) url(path string) string {
@@ -160,35 +198,100 @@ func parseErrorResponse(resp *http.Response) error {
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
-	apiErr := &APIError{
-		StatusCode: resp.StatusCode,
-		Body:       string(body),
+	message := parseErrorMessage(body)
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return &AuthError{Message: message}
+	case http.StatusPaymentRequired:
+		return &PaymentRequiredError{Message: message}
+	case http.StatusForbidden:
+		return &PermissionDeniedError{Message: message}
+	case http.StatusNotFound:
+		return &NotFoundError{Resource: "resource"}
 	}
 
-	// Try to parse structured error from response.
-	var parsed struct {
+	// Try field validation format: {"field": ["error1", "error2"]} (422).
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		if fields := parseValidationFields(body); fields != nil {
+			return &ValidationError{StatusCode: resp.StatusCode, Fields: fields}
+		}
+	}
+
+	return &APIError{
+		StatusCode: resp.StatusCode,
+		Code:       parseErrorCode(body),
+		Message:    message,
+		Body:       string(body),
+	}
+}
+
+// parseErrorMessage extracts a human-readable message from the API response body.
+// It tries multiple formats in order of specificity.
+func parseErrorMessage(body []byte) string {
+	// Format 1: {"code": "...", "message": "...", "description": "..."} (business errors).
+	var structured struct {
 		Code        string `json:"code"`
 		Message     string `json:"message"`
 		Description string `json:"description"`
 	}
 
-	if json.Unmarshal(body, &parsed) == nil {
-		apiErr.Code = parsed.Code
+	if json.Unmarshal(body, &structured) == nil {
+		if structured.Message != "" {
+			return structured.Message
+		}
 
-		if parsed.Message != "" {
-			apiErr.Message = parsed.Message
-		} else if parsed.Description != "" {
-			apiErr.Message = parsed.Description
+		if structured.Description != "" {
+			return structured.Description
 		}
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized {
-		return &AuthError{Message: apiErr.Message}
+	// Format 2: {"error": "..."} (400 parse errors).
+	var simpleErr struct {
+		Error string `json:"error"`
 	}
 
-	if resp.StatusCode == http.StatusNotFound {
-		return &NotFoundError{Resource: "resource"}
+	if json.Unmarshal(body, &simpleErr) == nil && simpleErr.Error != "" {
+		return simpleErr.Error
 	}
 
-	return apiErr
+	return ""
+}
+
+func parseErrorCode(body []byte) string {
+	var structured struct {
+		Code string `json:"code"`
+	}
+
+	if json.Unmarshal(body, &structured) == nil {
+		return structured.Code
+	}
+
+	return ""
+}
+
+// parseValidationFields tries to parse the body as field validation errors.
+// Returns nil if the body doesn't match the format {"field": ["error1"]}.
+func parseValidationFields(body []byte) map[string][]string {
+	var fields map[string][]string
+	if json.Unmarshal(body, &fields) != nil {
+		return nil
+	}
+
+	// Validate that we actually got field validation errors (not a structured error).
+	// Field validation maps must have at least one field with string slice values.
+	if len(fields) == 0 {
+		return nil
+	}
+
+	// Check for known structured error keys that would indicate this isn't a validation response.
+	if _, hasCode := fields["code"]; hasCode {
+		return nil
+	}
+
+	if _, hasMessage := fields["message"]; hasMessage {
+		return nil
+	}
+
+	return fields
 }
