@@ -363,18 +363,28 @@ func TestAuthorize_FallsBackToNativeWithCredentials(t *testing.T) {
 	}
 }
 
-func TestAuthorize_CredentialsError(t *testing.T) {
-	// No broker URL + credentials fail → should return credentials error.
+func TestAuthorize_CredentialsError_FallsBackToBroker(t *testing.T) {
+	// No broker URL + credentials fail → falls back to default broker.
 	mockReadCredentialsFail(t)
 
-	_, err := Authorize(context.Background(), AuthorizeOptions{Timeout: time.Second})
-	if err == nil {
-		t.Fatal("expected error")
+	mockBrowser(t, func(_ string) error {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+
+			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?token=fallback-tok&user_id=99", CallbackPort)
+			doCallbackRequest(t, callbackURL)
+		}()
+
+		return nil
+	})
+
+	tok, err := Authorize(context.Background(), AuthorizeOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("error = %v", err)
 	}
 
-	var credErr *config.CredentialsMissingError
-	if !errors.As(err, &credErr) {
-		t.Errorf("expected CredentialsMissingError, got %T: %v", err, err)
+	if tok.AccessToken != "fallback-tok" {
+		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "fallback-tok")
 	}
 }
 

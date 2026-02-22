@@ -75,18 +75,22 @@ func Authorize(ctx context.Context, opts AuthorizeOptions) (TokenResponse, error
 	defer cancel()
 
 	brokerURL := opts.BrokerURL
-	if brokerURL == "" {
-		brokerURL = DefaultBrokerURL
-	}
-
 	if brokerURL != "" {
 		// Broker flow — no local credentials needed.
 		return authorizeServer(ctx, opts, config.ClientCredentials{}, brokerURL)
 	}
 
-	// Native flow — requires local credentials.
+	// Try native flow — requires local credentials.
 	creds, err := readClientCredentials(opts.Client)
 	if err != nil {
+		// No credentials and no broker URL explicitly set — fall back to default broker.
+		if DefaultBrokerURL != "" {
+			var credErr *config.CredentialsMissingError
+			if errors.As(err, &credErr) {
+				return authorizeServer(ctx, opts, config.ClientCredentials{}, DefaultBrokerURL)
+			}
+		}
+
 		return TokenResponse{}, err
 	}
 
