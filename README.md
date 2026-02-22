@@ -1,4 +1,4 @@
-# nube-cli - a CLI for managing Tienda Nube stores.
+# ☁️ nube-cli - a CLI for managing Tienda Nube stores.
 
 ![GitHub Repo Banner](https://ghrb.waren.build/banner?header=%E2%98%81%EF%B8%8F+nube-cli&bg=0055D4-001554&color=FFFFFF&headerfont=Google+Sans&watermarkpos=bottom-right)
 <!-- Created with GitHub Repo Banner by Waren Gonzaga: https://ghrb.waren.build -->

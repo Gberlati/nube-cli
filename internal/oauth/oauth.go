@@ -23,6 +23,8 @@ const (
 	AuthBaseURL = "https://www.tiendanube.com/apps"
 	// TokenURL is the Tienda Nube token exchange endpoint.
 	TokenURL = "https://www.tiendanube.com/apps/authorize/token" //nolint:gosec // URL, not a credential
+	// CallbackPort is the fixed port for the local OAuth callback server.
+	CallbackPort = 8910
 )
 
 // AuthorizeOptions configures the OAuth flow.
@@ -97,15 +99,14 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 		return TokenResponse{}, err
 	}
 
-	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", CallbackPort))
 	if err != nil {
 		return TokenResponse{}, fmt.Errorf("listen for callback: %w", err)
 	}
 
 	defer func() { _ = ln.Close() }()
 
-	port := ln.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", CallbackPort)
 
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
