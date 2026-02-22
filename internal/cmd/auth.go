@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -166,12 +165,9 @@ func (c *AuthCredentialsListCmd) Run(ctx context.Context, _ *RootFlags) error {
 // --- Auth Add ---
 
 type AuthAddCmd struct {
-	Email   string        `arg:"" name:"email" help:"Account email"`
-	Manual  bool          `name:"manual" help:"Browserless auth flow (paste code)"`
-	Remote  bool          `name:"remote" help:"Remote/server-friendly manual flow (print URL, then exchange code)"`
-	Step    int           `name:"step" help:"Remote auth step: 1=print URL, 2=exchange code"`
-	AuthURL string        `name:"auth-url" help:"Redirect URL from browser (manual flow; required for --remote --step 2)"`
-	Timeout time.Duration `name:"timeout" help:"Authorization timeout" default:"5m"`
+	Email     string        `arg:"" name:"email" help:"Account email"`
+	Timeout   time.Duration `name:"timeout" help:"Authorization timeout" default:"5m"`
+	BrokerURL string        `name:"broker-url" help:"OAuth broker URL (overrides default)" env:"NUBE_AUTH_BROKER"`
 }
 
 func (c *AuthAddCmd) Run(ctx context.Context, flags *RootFlags) error {
@@ -187,38 +183,12 @@ func (c *AuthAddCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
-	if c.Step != 0 && c.Step != 1 && c.Step != 2 {
-		return usagef("step must be 1 or 2")
-	}
-
-	if c.Step != 0 && !c.Remote {
-		return usagef("--step requires --remote")
-	}
-
-	manual := c.Manual || c.Remote || c.AuthURL != ""
-
-	if c.Remote && c.Step == 0 {
-		if c.AuthURL != "" {
-			c.Step = 2
-		} else {
-			c.Step = 1
-		}
-	}
-
 	tok, err := authorizeOAuth(ctx, oauth.AuthorizeOptions{
-		Manual:  manual,
-		Remote:  c.Remote,
-		Step:    c.Step,
-		AuthURL: c.AuthURL,
-		Timeout: c.Timeout,
-		Client:  client,
+		Timeout:   c.Timeout,
+		Client:    client,
+		BrokerURL: c.BrokerURL,
 	})
 	if err != nil {
-		var stepOne *oauth.StepOneComplete
-		if errors.As(err, &stepOne) {
-			return nil // step 1 printed the URL; success with no output
-		}
-
 		return err
 	}
 

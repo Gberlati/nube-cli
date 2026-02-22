@@ -14,7 +14,7 @@ Fast, agentic and script-friendly CLI for managing Tienda Nube stores from the t
 - **Multiple accounts** — manage multiple Tienda Nube stores simultaneously (with aliases)
 - **Command allowlist** — restrict top-level commands for sandboxed/agent runs
 - **Secure credential storage** — OS keyring or encrypted on-disk keyring (configurable)
-- **Auth** — OAuth authorization flow (browser, manual, remote), credential management, account aliases
+- **Auth** — OAuth authorization via broker (zero-setup) or native browser flow (custom app credentials), credential management, account aliases
 - **Parseable output** — JSON (`--json`) and TSV (`--plain`) modes for scripting and automation
 
 **Planned:**
@@ -59,31 +59,44 @@ Run:
 ## Quick Start
 
 ```bash
+# Authorize a store (opens browser — no setup required)
+nube auth add user@example.com
+
 # Check version
 nube version
-
-# Show config file path
-nube config path
-
-# List all configuration values
-nube config list
-
-# Set keyring backend
-nube config set keyring_backend file
 
 # JSON output for scripting
 nube version --json
 nube config list --json
-
-# Extract specific fields from JSON output
-nube product list --json --select id,name.en,variants
 ```
 
 ## Authentication
 
-nube-cli uses OAuth to authenticate with the Tienda Nube API. You need OAuth client credentials (a `credentials.json` file containing `client_id` and `client_secret`) to get started.
+nube-cli supports two OAuth flows: a **broker flow** (default, zero setup) and a **native browser flow** (for developers with their own Tienda Nube app credentials).
 
-### 1. Store OAuth credentials
+### Default (Broker)
+
+Just run:
+
+```bash
+nube auth add user@example.com
+```
+
+The browser opens, you authorize, and the token is stored automatically. No credentials file needed.
+
+Override the broker URL if needed:
+
+```bash
+nube auth add user@example.com --broker-url https://my-broker.example.com
+# or via environment variable
+NUBE_AUTH_BROKER=https://my-broker.example.com nube auth add user@example.com
+```
+
+### Custom App (Native)
+
+For developers with their own Tienda Nube app credentials:
+
+**1. Store OAuth credentials**
 
 ```bash
 # From a file
@@ -96,31 +109,22 @@ cat credentials.json | nube auth credentials set -
 nube auth credentials list
 ```
 
-### 2. Authorize a store
+**2. Authorize a store**
 
-**Browser flow** (default) — opens the browser for authorization:
+When no broker URL is configured and credentials are present, the CLI uses the native browser flow:
 
 ```bash
 nube auth add user@example.com
 ```
 
-**Manual flow** — paste the authorization code in the terminal:
+Use `--client` for named credential sets:
 
 ```bash
-nube auth add user@example.com --manual
+nube auth credentials set creds.json --client beta
+nube auth add user@example.com --client beta
 ```
 
-**Remote flow** — two-step process for headless servers:
-
-```bash
-# Step 1: print the authorization URL (copy to a browser)
-nube auth add user@example.com --remote --step 1
-
-# Step 2: exchange the redirect URL for a token
-nube auth add user@example.com --remote --step 2 --auth-url "http://localhost:8910/callback?code=..."
-```
-
-### 3. Manage accounts
+### Account Management
 
 ```bash
 # List authorized accounts
@@ -136,7 +140,7 @@ nube auth remove user@example.com
 nube auth tokens list
 ```
 
-### 4. Account aliases
+### Account Aliases
 
 Aliases let you refer to accounts by short names instead of email addresses:
 
@@ -154,7 +158,7 @@ nube auth alias list
 nube auth alias unset prod
 ```
 
-### 5. Multiple stores
+### Multiple Stores
 
 Use `--client` to manage separate OAuth credential sets and token buckets:
 
@@ -169,10 +173,34 @@ nube auth add user@example.com --client beta
 nube <command> --account user@example.com --client beta
 ```
 
+## CLI Command Reference
+
+### Implemented
+
+- `nube version` — print version, commit, and build date
+- `nube config keys` — list valid config keys
+- `nube config get <key>` — get a config value
+- `nube config list` — list all config values
+- `nube config path` — show config file path
+- `nube config set <key> <value>` — set a config value
+- `nube config unset <key>` — unset a config value
+- `nube auth credentials set <path>` — store OAuth client credentials
+- `nube auth credentials list` — list stored credentials
+- `nube auth add <email>` — authorize and store access token
+- `nube auth list` — list stored accounts
+- `nube auth alias list` — list account aliases
+- `nube auth alias set <alias> <email>` — create account alias
+- `nube auth alias unset <alias>` — remove account alias
+- `nube auth status` — show auth config and keyring backend
+- `nube auth remove <email>` — remove stored token
+- `nube auth tokens list` — list raw keyring keys
+- `nube auth tokens delete <email>` — delete stored token
+
 ## Environment Variables
 
  - `NUBE_ACCOUNT` — Account email or alias for API commands (used when `--account` is not set)
  - `NUBE_CLIENT` — OAuth client bucket name (used when `--client` is not set)
+ - `NUBE_AUTH_BROKER` — OAuth broker URL (overrides the default broker)
  - `NUBE_KEYRING_PASSWORD` — Password used as fallback to encrypt tokens if no OS keyring is available
  - `NUBE_KEYRING_BACKEND` — Force keyring backend: `auto` (default), `keychain`, or `file`
  - `NUBE_JSON` — Default to JSON output (`1`, `true`, `yes`)
@@ -187,6 +215,25 @@ Access tokens are stored in the OS keyring (macOS Keychain, Linux SecretService/
 All config and credential files are written with `0600` permissions. Config directories use `0700`.
 
 TLS 1.2+ is enforced for all API connections. A circuit breaker prevents cascading failures when the API is unresponsive. API errors are typed and user-friendly messages are shown for common issues (auth failures, payment required, permission denied, validation errors).
+
+## Development
+
+### Build from source
+
+```bash
+make          # build binary to ./bin/nube
+make tools    # install pinned dev tools
+make fmt      # format code
+make lint     # lint code
+make test     # run tests
+make fmt-check # check formatting (CI)
+```
+
+### Pre-commit hooks
+
+```bash
+lefthook install  # runs fmt-check, lint, test before each commit
+```
 
 ## License
 

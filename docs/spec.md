@@ -78,11 +78,40 @@ Implementation: `internal/secrets/store.go`.
 
 ### OAuth flow
 
-- Desktop OAuth 2.0 flow using local HTTP redirect on an ephemeral port.
-- Supports a browserless/manual flow (paste redirect URL) for headless environments.
-- Supports a remote/server-friendly 2-step manual flow:
-  - Step 1 prints an auth URL (`nube auth add ... --remote --step 1`)
-  - Step 2 exchanges the pasted redirect URL and requires `state` validation (`--remote --step 2 --auth-url ...`)
+Two flows:
+
+- **Broker (default)**: An OAuth broker (Cloudflare Worker) holds the app credentials. The CLI starts a local callback server, opens `{brokerURL}/start?port={CallbackPort}` in the browser, and receives the access token directly via `?token=...&user_id=...`. No local `credentials.json` needed. The broker URL can be overridden via `--broker-url` or `NUBE_AUTH_BROKER`.
+- **Native (custom app)**: For developers with their own Tienda Nube app credentials. Stores `credentials.json` locally, opens the Tienda Nube authorization page, receives a `?code=...` callback, and exchanges it for an access token. Used when no broker URL is configured (i.e., `DefaultBrokerURL` is empty and `--broker-url` is not set).
+
+## OAuth Broker (Cloudflare Worker)
+
+The default broker flow uses a stateless Cloudflare Worker that holds the Tienda Nube app credentials (`CLIENT_ID`, `CLIENT_SECRET`) server-side. This way CLI users can authenticate without needing their own `credentials.json`.
+
+### Architecture
+
+- **Stateless**: no database or KV — each request is self-contained.
+- **Secrets**: `CLIENT_ID` and `CLIENT_SECRET` are set via `wrangler secret put` (never checked into source).
+
+### Endpoints
+
+- `GET /start?port=<port>` — validates the port and redirects (302) to the Tienda Nube authorization page with `state=<port>`.
+- `GET /callback?code=<code>&state=<port>` — exchanges the authorization code for an access token (server-to-server POST), then redirects (302) to `http://127.0.0.1:<port>/callback?token=<token>&user_id=<user_id>`.
+- `GET /robots.txt` — returns `Disallow: /`.
+- Everything else — 404.
+
+### Deployment
+
+```sh
+cd broker
+npm install
+wrangler secret put CLIENT_ID
+wrangler secret put CLIENT_SECRET
+wrangler deploy
+```
+
+### Code location
+
+`broker/` — see `broker/src/index.js`.
 
 ## Config layout
 
@@ -100,6 +129,7 @@ Environment:
 
 - `NUBE_ACCOUNT=you@gmail.com` (email or alias; used when `--account` is not set; otherwise uses keyring default or a single stored token)
 - `NUBE_CLIENT=work` (select OAuth client bucket; see `--client`)
+- `NUBE_AUTH_BROKER=https://...` (override the default OAuth broker URL; see `--broker-url`)
 - `NUBE_KEYRING_PASSWORD=...` (used when keyring falls back to encrypted file backend in non-interactive environments)
 - `NUBE_KEYRING_BACKEND={auto|keychain|file}` (force backend; use `file` to avoid Keychain prompts and pair with `NUBE_KEYRING_PASSWORD` for non-interactive)
 - `config.json` can also set `keyring_backend` (JSON5; env vars take precedence)
@@ -353,7 +383,8 @@ We avoid heavy table deps unless we decide we need them.
 - `internal/config/*` — config paths + credential parsing/writing + aliases
 - `internal/secrets/*` — keyring store
 - `internal/api/*` — Tienda Nube API client (HTTP client, retry transport, circuit breaker, TLS enforcement, typed errors: `APIError`, `AuthError`, `NotFoundError`, `RateLimitError`, `ValidationError`, `PaymentRequiredError`, `PermissionDeniedError`, `CircuitBreakerError`, pagination)
-- `internal/oauth/*` — OAuth 2.0 flow (browser, manual, remote 2-step)
+- `internal/oauth/*` — OAuth 2.0 flow (broker default, native browser fallback)
+- `broker/` — OAuth broker Cloudflare Worker (holds app credentials server-side)
 
 ## API error handling
 

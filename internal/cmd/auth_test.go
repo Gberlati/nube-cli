@@ -76,39 +76,6 @@ func TestAuthAdd_EmptyEmail(t *testing.T) {
 	}
 }
 
-func TestAuthAdd_InvalidStep(t *testing.T) {
-	setupConfigDir(t)
-	_ = captureStdout(t)
-
-	err := Execute([]string{"auth", "add", "user@example.com", "--remote", "--step", "3"})
-	if err == nil {
-		t.Fatal("expected error for invalid step")
-	}
-}
-
-func TestAuthAdd_StepWithoutRemote(t *testing.T) {
-	setupConfigDir(t)
-	_ = captureStdout(t)
-
-	err := Execute([]string{"auth", "add", "user@example.com", "--step", "1"})
-	if err == nil {
-		t.Fatal("expected error for step without --remote")
-	}
-}
-
-func TestAuthAdd_StepOneComplete(t *testing.T) {
-	setupConfigDir(t)
-	setupMockStore(t)
-	mockAuthorizeOAuth(t, oauth.TokenResponse{}, &oauth.StepOneComplete{})
-
-	buf := captureStdout(t)
-	err := Execute([]string{"auth", "add", "user@example.com", "--remote", "--step", "1"})
-	if err != nil {
-		t.Fatalf("StepOneComplete should not be an error, got: %v", err)
-	}
-	_ = buf.String()
-}
-
 func TestAuthAdd_OAuthError(t *testing.T) {
 	setupConfigDir(t)
 	setupMockStore(t)
@@ -118,6 +85,33 @@ func TestAuthAdd_OAuthError(t *testing.T) {
 	err := Execute([]string{"auth", "add", "user@example.com"})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestAuthAdd_BrokerURL(t *testing.T) {
+	setupConfigDir(t)
+	setupMockStore(t)
+
+	var capturedOpts oauth.AuthorizeOptions
+
+	orig := authorizeOAuth
+	authorizeOAuth = func(_ context.Context, opts oauth.AuthorizeOptions) (oauth.TokenResponse, error) {
+		capturedOpts = opts
+		return oauth.TokenResponse{
+			AccessToken: "tok",
+			UserID:      "1",
+		}, nil
+	}
+	t.Cleanup(func() { authorizeOAuth = orig })
+
+	_ = captureStdout(t)
+	err := Execute([]string{"auth", "add", "user@example.com", "--broker-url", "http://broker.test"})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	if capturedOpts.BrokerURL != "http://broker.test" {
+		t.Errorf("BrokerURL = %q, want %q", capturedOpts.BrokerURL, "http://broker.test")
 	}
 }
 

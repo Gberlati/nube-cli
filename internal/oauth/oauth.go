@@ -25,16 +25,16 @@ const (
 	TokenURL = "https://www.tiendanube.com/apps/authorize/token" //nolint:gosec // URL, not a credential
 	// CallbackPort is the fixed port for the local OAuth callback server.
 	CallbackPort = 8910
+	// DefaultBrokerURL is the default OAuth broker URL.
+	// Set to the deployed Cloudflare Worker URL. See broker/ for the worker source.
+	DefaultBrokerURL = ""
 )
 
 // AuthorizeOptions configures the OAuth flow.
 type AuthorizeOptions struct {
-	Manual  bool
-	Remote  bool
-	Step    int
-	AuthURL string
-	Timeout time.Duration
-	Client  string
+	Timeout   time.Duration
+	Client    string
+	BrokerURL string
 }
 
 // TokenResponse holds the response from the Tienda Nube token endpoint.
@@ -45,13 +45,21 @@ type TokenResponse struct {
 	UserID      json.Number `json:"user_id"`
 }
 
+// authResult is the result received from the local callback server.
+// For the broker flow, token and userID are set directly.
+// For the native flow, code is set and must be exchanged for a token.
+type authResult struct {
+	code   string // native flow: authorization code
+	token  string // broker flow: access token
+	userID string // broker flow: user ID
+}
+
 var (
-	errMissingCode    = errors.New("missing authorization code")
-	errMissingAuthURL = errors.New("missing auth URL for remote step 2")
-	errStateMismatch  = errors.New("state mismatch (possible CSRF attack)")
-	errAuthorization  = errors.New("authorization error")
-	errTokenExchange  = errors.New("token exchange failed")
-	errNoAccessToken  = errors.New("no access token in response")
+	errMissingCode   = errors.New("missing authorization code")
+	errStateMismatch = errors.New("state mismatch (possible CSRF attack)")
+	errAuthorization = errors.New("authorization error")
+	errTokenExchange = errors.New("token exchange failed")
+	errNoAccessToken = errors.New("no access token in response")
 
 	readClientCredentials = config.ReadClientCredentialsFor
 	openBrowserFn         = openBrowser
@@ -63,40 +71,44 @@ func Authorize(ctx context.Context, opts AuthorizeOptions) (TokenResponse, error
 		opts.Timeout = 2 * time.Minute
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+
+	brokerURL := opts.BrokerURL
+	if brokerURL == "" {
+		brokerURL = DefaultBrokerURL
+	}
+
+	if brokerURL != "" {
+		// Broker flow — no local credentials needed.
+		return authorizeServer(ctx, opts, config.ClientCredentials{}, brokerURL)
+	}
+
+	// Native flow — requires local credentials.
 	creds, err := readClientCredentials(opts.Client)
 	if err != nil {
 		return TokenResponse{}, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
-
-	if opts.Manual || opts.Remote || opts.AuthURL != "" {
-		return authorizeManual(ctx, opts, creds)
-	}
-
-	return authorizeServer(ctx, opts, creds)
-}
-
-// ManualAuthURL returns the authorization URL for the manual flow
-// (used with --remote --step 1).
-func ManualAuthURL(clientName string) (string, error) {
-	creds, err := readClientCredentials(clientName)
-	if err != nil {
-		return "", err
-	}
-
-	return authURL(creds.ClientID), nil
+	return authorizeServer(ctx, opts, creds, "")
 }
 
 func authURL(clientID string) string {
 	return fmt.Sprintf("%s/%s/authorize", AuthBaseURL, clientID)
 }
 
-func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.ClientCredentials) (TokenResponse, error) {
-	state, err := randomState()
-	if err != nil {
-		return TokenResponse{}, err
+func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.ClientCredentials, brokerURL string) (TokenResponse, error) {
+	isBroker := brokerURL != ""
+
+	var state string
+
+	if !isBroker {
+		var err error
+
+		state, err = randomState()
+		if err != nil {
+			return TokenResponse{}, err
+		}
 	}
 
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", CallbackPort))
@@ -106,9 +118,7 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 
 	defer func() { _ = ln.Close() }()
 
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", CallbackPort)
-
-	codeCh := make(chan string, 1)
+	resultCh := make(chan authResult, 1)
 	errCh := make(chan error, 1)
 
 	srv := &http.Server{
@@ -133,38 +143,65 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 				return
 			}
 
-			if q.Get("state") != state {
+			// Broker flow: token + user_id come directly.
+			if tok := q.Get("token"); tok != "" {
 				select {
-				case errCh <- errStateMismatch:
+				case resultCh <- authResult{token: tok, userID: q.Get("user_id")}:
 				default:
 				}
 
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = fmt.Fprint(w, "State mismatch. Please try again.")
+				w.WriteHeader(http.StatusOK)
+				_, _ = fmt.Fprint(w, "Authorization successful! You can close this window.")
 
 				return
 			}
 
-			code := q.Get("code")
-			if code == "" {
+			// Native flow: code + state validation.
+			if !isBroker {
+				if q.Get("state") != state {
+					select {
+					case errCh <- errStateMismatch:
+					default:
+					}
+
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = fmt.Fprint(w, "State mismatch. Please try again.")
+
+					return
+				}
+
+				code := q.Get("code")
+				if code == "" {
+					select {
+					case errCh <- errMissingCode:
+					default:
+					}
+
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = fmt.Fprint(w, "Missing authorization code.")
+
+					return
+				}
+
 				select {
-				case errCh <- errMissingCode:
+				case resultCh <- authResult{code: code}:
 				default:
 				}
 
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = fmt.Fprint(w, "Missing authorization code.")
+				w.WriteHeader(http.StatusOK)
+				_, _ = fmt.Fprint(w, "Authorization successful! You can close this window.")
 
 				return
 			}
 
+			// Broker flow but no token — unexpected.
 			select {
-			case codeCh <- code:
+			case errCh <- errNoAccessToken:
 			default:
 			}
 
-			w.WriteHeader(http.StatusOK)
-			_, _ = fmt.Fprint(w, "Authorization successful! You can close this window.")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, "Missing token in callback.")
 		}),
 	}
 
@@ -182,10 +219,17 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 		}
 	}()
 
-	fullAuthURL := fmt.Sprintf("%s?redirect_uri=%s&state=%s",
-		authURL(creds.ClientID),
-		url.QueryEscape(redirectURI),
-		url.QueryEscape(state))
+	// Build the authorization URL.
+	var fullAuthURL string
+	if isBroker {
+		fullAuthURL = fmt.Sprintf("%s/start?port=%d", brokerURL, CallbackPort)
+	} else {
+		redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", CallbackPort)
+		fullAuthURL = fmt.Sprintf("%s?redirect_uri=%s&state=%s",
+			authURL(creds.ClientID),
+			url.QueryEscape(redirectURI),
+			url.QueryEscape(state))
+	}
 
 	fmt.Fprintln(os.Stderr, "Opening browser for authorization...")
 	fmt.Fprintln(os.Stderr, "If the browser doesn't open, visit this URL:")
@@ -193,10 +237,23 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 	_ = openBrowserFn(fullAuthURL)
 
 	select {
-	case code := <-codeCh:
+	case res := <-resultCh:
+		if res.token != "" {
+			// Broker flow — token received directly.
+			shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 2*time.Second)
+			defer shutdownCancel()
+			_ = srv.Shutdown(shutdownCtx)
+
+			return TokenResponse{
+				AccessToken: res.token,
+				UserID:      json.Number(res.userID),
+			}, nil
+		}
+
+		// Native flow — exchange authorization code.
 		fmt.Fprintln(os.Stderr, "Authorization received. Exchanging code...")
 
-		tok, exchangeErr := exchangeCode(ctx, creds, code)
+		tok, exchangeErr := exchangeCode(ctx, creds, res.code)
 		if exchangeErr != nil {
 			_ = srv.Close()
 			return TokenResponse{}, exchangeErr
@@ -214,54 +271,6 @@ func authorizeServer(ctx context.Context, _ AuthorizeOptions, creds config.Clien
 		_ = srv.Close()
 		return TokenResponse{}, fmt.Errorf("authorization timed out: %w", ctx.Err())
 	}
-}
-
-func authorizeManual(ctx context.Context, opts AuthorizeOptions, creds config.ClientCredentials) (TokenResponse, error) {
-	// Remote step 1: print auth URL.
-	if opts.Remote && opts.Step == 1 {
-		fmt.Fprintln(os.Stderr, "Visit this URL to authorize:")
-		fmt.Fprintln(os.Stdout, authURL(creds.ClientID))
-		fmt.Fprintln(os.Stderr, "\nAfter authorizing, run again with --remote --step 2 --auth-url <redirect-url>")
-
-		return TokenResponse{}, &StepOneComplete{}
-	}
-
-	// Remote step 2 or manual flow with --auth-url.
-	authURLInput := strings.TrimSpace(opts.AuthURL)
-	if opts.Remote && opts.Step == 2 && authURLInput == "" {
-		return TokenResponse{}, errMissingAuthURL
-	}
-
-	if authURLInput != "" {
-		code, parseErr := extractCodeFromURL(authURLInput)
-		if parseErr != nil {
-			return TokenResponse{}, parseErr
-		}
-
-		return exchangeCode(ctx, creds, code)
-	}
-
-	// Interactive manual: print URL and ask user to paste code.
-	fmt.Fprintln(os.Stderr, "Visit this URL to authorize:")
-	fmt.Fprintln(os.Stderr, authURL(creds.ClientID))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprint(os.Stderr, "Paste the authorization code: ")
-
-	var code string
-	if _, err := fmt.Fscan(os.Stdin, &code); err != nil {
-		if errors.Is(err, io.EOF) {
-			return TokenResponse{}, fmt.Errorf("authorization cancelled: %w", context.Canceled)
-		}
-
-		return TokenResponse{}, fmt.Errorf("read code: %w", err)
-	}
-
-	code = strings.TrimSpace(code)
-	if code == "" {
-		return TokenResponse{}, errMissingCode
-	}
-
-	return exchangeCode(ctx, creds, code)
 }
 
 func exchangeCode(ctx context.Context, creds config.ClientCredentials, code string) (TokenResponse, error) {
@@ -303,25 +312,6 @@ func exchangeCode(ctx context.Context, creds config.ClientCredentials, code stri
 	return tok, nil
 }
 
-func extractCodeFromURL(rawURL string) (string, error) {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("parse URL: %w", err)
-	}
-
-	code := parsed.Query().Get("code")
-	if code == "" {
-		// Maybe the user pasted just the code.
-		code = strings.TrimSpace(rawURL)
-	}
-
-	if code == "" {
-		return "", errMissingCode
-	}
-
-	return code, nil
-}
-
 func randomState() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -330,8 +320,3 @@ func randomState() (string, error) {
 
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
-
-// StepOneComplete indicates --remote --step 1 completed (URL was printed).
-type StepOneComplete struct{}
-
-func (e *StepOneComplete) Error() string { return "step 1 complete" }

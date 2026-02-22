@@ -30,6 +30,17 @@ func mockReadCredentials(t *testing.T) {
 	t.Cleanup(func() { readClientCredentials = orig })
 }
 
+func mockReadCredentialsFail(t *testing.T) {
+	t.Helper()
+
+	orig := readClientCredentials
+	readClientCredentials = func(_ string) (config.ClientCredentials, error) {
+		return config.ClientCredentials{}, &config.CredentialsMissingError{Path: "/test"}
+	}
+
+	t.Cleanup(func() { readClientCredentials = orig })
+}
+
 func mockBrowser(t *testing.T, fn func(string) error) {
 	t.Helper()
 
@@ -70,48 +81,6 @@ func (t *tokenRedirectTransport) RoundTrip(req *http.Request) (*http.Response, e
 	}
 
 	return t.base.RoundTrip(req) //nolint:wrapcheck // test helper
-}
-
-func TestExtractCodeFromURL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		input   string
-		want    string
-		wantErr bool
-	}{
-		{
-			name:  "full URL with code",
-			input: "http://localhost:8910/callback?code=abc123&state=xyz",
-			want:  "abc123",
-		},
-		{
-			name:  "bare code",
-			input: "abc123",
-			want:  "abc123",
-		},
-		{
-			name:    "empty",
-			input:   "",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := extractCodeFromURL(tt.input)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
-			}
-
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
 }
 
 func TestExchangeCode_Success(t *testing.T) {
@@ -173,58 +142,6 @@ func TestExchangeCode_EmptyToken(t *testing.T) {
 	}
 }
 
-func TestAuthorizeManual_RemoteStep1(t *testing.T) {
-	mockReadCredentials(t)
-
-	_, err := authorizeManual(context.Background(), AuthorizeOptions{
-		Remote: true,
-		Step:   1,
-	}, testCreds)
-
-	var stepOne *StepOneComplete
-	if !errors.As(err, &stepOne) {
-		t.Fatalf("expected StepOneComplete, got %T: %v", err, err)
-	}
-}
-
-func TestAuthorizeManual_RemoteStep2_WithAuthURL(t *testing.T) {
-	mockReadCredentials(t)
-
-	mockTokenServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(200)
-		_ = json.NewEncoder(w).Encode(TokenResponse{
-			AccessToken: "remote-tok",
-			UserID:      "1",
-		})
-	})
-
-	tok, err := authorizeManual(context.Background(), AuthorizeOptions{
-		Remote:  true,
-		Step:    2,
-		AuthURL: "http://example.com/callback?code=remote-code",
-	}, testCreds)
-	if err != nil {
-		t.Fatalf("error = %v", err)
-	}
-
-	if tok.AccessToken != "remote-tok" {
-		t.Errorf("AccessToken = %q", tok.AccessToken)
-	}
-}
-
-func TestAuthorizeManual_RemoteStep2_MissingAuthURL(t *testing.T) {
-	mockReadCredentials(t)
-
-	_, err := authorizeManual(context.Background(), AuthorizeOptions{
-		Remote: true,
-		Step:   2,
-	}, testCreds)
-
-	if !errors.Is(err, errMissingAuthURL) {
-		t.Errorf("expected errMissingAuthURL, got %v", err)
-	}
-}
-
 func doCallbackRequest(t *testing.T, callbackURL string) {
 	t.Helper()
 
@@ -272,7 +189,7 @@ func TestAuthorizeServer(t *testing.T) {
 		})
 	})
 
-	tok, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 5 * time.Second}, testCreds)
+	tok, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 5 * time.Second}, testCreds, "")
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
@@ -296,7 +213,7 @@ func TestAuthorizeServer_StateMismatch(t *testing.T) {
 		return nil
 	})
 
-	_, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 2 * time.Second}, testCreds)
+	_, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 2 * time.Second}, testCreds, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -323,7 +240,7 @@ func TestAuthorizeServer_MissingCode(t *testing.T) {
 		return nil
 	})
 
-	_, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 2 * time.Second}, testCreds)
+	_, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 2 * time.Second}, testCreds, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -344,34 +261,111 @@ func TestAuthorizeServer_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_, err := authorizeServer(ctx, AuthorizeOptions{}, testCreds)
+	_, err := authorizeServer(ctx, AuthorizeOptions{}, testCreds, "")
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
 }
 
-func TestAuthorize_DelegatesToManual(t *testing.T) {
-	mockReadCredentials(t)
+func TestAuthorizeServer_BrokerFlow(t *testing.T) {
+	// Cannot run in parallel — uses fixed port 8910
+	mockBrowser(t, func(_ string) error {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
 
-	_, err := Authorize(context.Background(), AuthorizeOptions{
-		Remote:  true,
-		Step:    1,
-		Timeout: 5 * time.Second,
+			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?token=broker-tok&user_id=77", CallbackPort)
+			doCallbackRequest(t, callbackURL)
+		}()
+
+		return nil
 	})
 
-	var stepOne *StepOneComplete
-	if !errors.As(err, &stepOne) {
-		t.Fatalf("expected StepOneComplete, got %v", err)
+	tok, err := authorizeServer(context.Background(), AuthorizeOptions{Timeout: 5 * time.Second}, config.ClientCredentials{}, "http://broker.example.com")
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	if tok.AccessToken != "broker-tok" {
+		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "broker-tok")
+	}
+
+	if tok.UserID.String() != "77" {
+		t.Errorf("UserID = %q, want %q", tok.UserID.String(), "77")
+	}
+}
+
+func TestAuthorize_BrokerSkipsCredentials(t *testing.T) {
+	// Make readClientCredentials fail — broker should not need them.
+	mockReadCredentialsFail(t)
+
+	mockBrowser(t, func(_ string) error {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+
+			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?token=broker-tok&user_id=88", CallbackPort)
+			doCallbackRequest(t, callbackURL)
+		}()
+
+		return nil
+	})
+
+	tok, err := Authorize(context.Background(), AuthorizeOptions{
+		Timeout:   5 * time.Second,
+		BrokerURL: "http://broker.example.com",
+	})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	if tok.AccessToken != "broker-tok" {
+		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "broker-tok")
+	}
+}
+
+func TestAuthorize_FallsBackToNativeWithCredentials(t *testing.T) {
+	mockReadCredentials(t)
+
+	var capturedURL string
+
+	mockBrowser(t, func(u string) error {
+		capturedURL = u
+
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			parsed, _ := url.Parse(capturedURL)
+			state := parsed.Query().Get("state")
+
+			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?code=native-code&state=%s", CallbackPort, state)
+			doCallbackRequest(t, callbackURL)
+		}()
+
+		return nil
+	})
+
+	mockTokenServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(200)
+		_ = json.NewEncoder(w).Encode(TokenResponse{
+			AccessToken: "native-tok",
+			UserID:      "55",
+		})
+	})
+
+	// No broker URL — should use native flow with credentials.
+	tok, err := Authorize(context.Background(), AuthorizeOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	if tok.AccessToken != "native-tok" {
+		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "native-tok")
 	}
 }
 
 func TestAuthorize_CredentialsError(t *testing.T) {
-	orig := readClientCredentials
-	readClientCredentials = func(_ string) (config.ClientCredentials, error) {
-		return config.ClientCredentials{}, &config.CredentialsMissingError{Path: "/test"}
-	}
-
-	t.Cleanup(func() { readClientCredentials = orig })
+	// No broker URL + credentials fail → should return credentials error.
+	mockReadCredentialsFail(t)
 
 	_, err := Authorize(context.Background(), AuthorizeOptions{Timeout: time.Second})
 	if err == nil {
@@ -385,18 +379,28 @@ func TestAuthorize_CredentialsError(t *testing.T) {
 }
 
 func TestAuthorize_DefaultTimeout(t *testing.T) {
-	// Just verify Authorize sets timeout if not provided.
-	// We'll check by using manual + remote step 1 which doesn't need a real server.
-	mockReadCredentials(t)
+	// Verify Authorize sets timeout if not provided.
+	// We use broker flow with a quick callback to test without a real server.
+	mockBrowser(t, func(_ string) error {
+		go func() {
+			time.Sleep(50 * time.Millisecond)
 
-	_, err := Authorize(context.Background(), AuthorizeOptions{
-		Remote: true,
-		Step:   1,
-		// Timeout: 0 → should default to 2min
+			callbackURL := fmt.Sprintf("http://127.0.0.1:%d/callback?token=tok&user_id=1", CallbackPort)
+			doCallbackRequest(t, callbackURL)
+		}()
+
+		return nil
 	})
 
-	var stepOne *StepOneComplete
-	if !errors.As(err, &stepOne) {
-		t.Fatalf("expected StepOneComplete, got %v", err)
+	tok, err := Authorize(context.Background(), AuthorizeOptions{
+		BrokerURL: "http://broker.example.com",
+		// Timeout: 0 → should default to 2min
+	})
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+
+	if tok.AccessToken != "tok" {
+		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "tok")
 	}
 }
